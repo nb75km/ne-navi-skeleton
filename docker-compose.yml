@@ -1,0 +1,68 @@
+services:
+  nginx:
+    build: ./nginx
+    ports:
+      - "80:80"
+    depends_on:
+      - chat
+      - minutes
+    networks: [appnet]
+
+  postgres:
+    image: pgvector/pgvector:0.7.4-pg16
+    build:
+      context: ./docker/postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=app
+      - POSTGRES_PASSWORD=app
+      - POSTGRES_DB=app
+      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [appnet]
+
+  redis:
+    image: redis:7
+    networks: [appnet]
+
+  chat:
+    build:
+      context: ./backend
+      dockerfile: chat_explorer/Dockerfile
+    env_file: .env
+    depends_on:
+      - postgres
+      - redis
+    networks: [appnet]
+
+  minutes:
+    build: ./backend/minutes_maker
+    env_file: .env
+    depends_on:
+      - postgres
+      - redis
+    networks: [appnet]
+
+  celery:
+    build: ./backend/shared
+    command: celery -A celery_app worker -l info -Q default
+    env_file: .env
+    depends_on:
+      - postgres
+      - redis
+    networks: [appnet]
+
+volumes:
+  db_data:
+
+networks:
+  appnet:
+    driver: bridge
