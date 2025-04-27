@@ -1,0 +1,59 @@
+name: DB schema & tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - "backend/**"
+      - "docker/**"
+      - ".github/workflows/db-check.yml"
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - "backend/**"
+      - "docker/**"
+
+jobs:
+  db-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: app
+        ports: [ "5432:5432" ]
+        options: >-
+          --health-cmd="pg_isready -U app" 
+          --health-interval=10s 
+          --health-timeout=5s 
+          --health-retries=5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: |
+          pip install --no-cache-dir -r backend/chat_explorer/requirements.txt
+          pip install alembic pytest
+
+      - name: Upgrade DB schema
+        env:
+          DATABASE_URL: postgresql+psycopg2://app:app@localhost:5432/app
+        run: |
+          cd backend
+          alembic upgrade head
+
+      - name: Run DB tests
+        env:
+          DATABASE_URL: postgresql+psycopg2://app:app@localhost:5432/app
+        run: |
+          cd backend
+          pytest -m db_check
