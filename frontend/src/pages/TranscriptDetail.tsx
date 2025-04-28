@@ -6,6 +6,9 @@ import { json } from "../lib/api";
 import DraftControls from "../components/DraftControls";
 import MinutesEditor from "../components/MinutesEditor";
 import GenerateDraftButton from "../components/GenerateDraftButton";
+import TranscriptControls from "../components/TranscriptControls";
+import ExportControls from "../components/ExportControls";
+
 
 interface Transcript {
   id: number;
@@ -66,6 +69,8 @@ export default function TranscriptDetail() {
           /* ドラフトが無い場合だけ表示 */
           <GenerateDraftButton transcriptId={data.id} />
         )}
+        <TranscriptControls transcriptId={data.id} />
+        <ExportControls transcriptId={data.id} />
       </div>
 
       {/* Draft が存在する場合のみ表示 & 編集 */}

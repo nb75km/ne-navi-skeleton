@@ -1,22 +1,22 @@
 from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from ..db import SessionLocal, models as M
+from ..service import export_file
 
 router = APIRouter(prefix="/api", tags=["transcripts"])
 
-
-def get_db() -> Session:               # unchanged
+def get_db() -> Session:
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
-
-# ---------- LIST & DETAIL ---------------------------------------------------
-@router.get("/transcripts")
+# --- 既存: LIST ---
+@router.get("/transcripts", status_code=status.HTTP_200_OK)
 def list_transcripts(
     limit: int = Query(50, le=200),
     offset: int = 0,
@@ -37,8 +37,8 @@ def list_transcripts(
     )
     return {"items": [t._asdict() for t in q]}
 
-
-@router.get("/transcripts/{tid}")
+# --- 既存: DETAIL ---
+@router.get("/transcripts/{tid}", status_code=status.HTTP_200_OK)
 def get_transcript(tid: int, db: Session = Depends(get_db)):
     t = (
         db.query(M.Transcript, M.File.filename)
@@ -47,7 +47,7 @@ def get_transcript(tid: int, db: Session = Depends(get_db)):
         .first()
     )
     if not t:
-        raise HTTPException(404, "Not found")
+        raise HTTPException(status_code=404, detail="Not found")
     tr, fname = t
     return {
         "id": tr.id,
@@ -58,17 +58,33 @@ def get_transcript(tid: int, db: Session = Depends(get_db)):
         "content": tr.content,
     }
 
+# --- 新規: EXPORT ---
+@router.get("/transcripts/{tid}/export", status_code=status.HTTP_200_OK)
+def export_transcript(
+    tid: int,
+    format: str = Query(..., description="export format: markdown|docx|pdf|html"),
+    db: Session = Depends(get_db),
+):
+    allowed = {"markdown", "docx", "pdf", "html"}
+    if format not in allowed:
+        raise HTTPException(status_code=400, detail="Unsupported format")
 
-# ---------- NEW: DELETE -----------------------------------------------------
+    try:
+        content, mime = export_file(tid, format)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Export error: {e}")
+
+    ext = "md" if format == "markdown" else format
+    filename = f"transcript_{tid}.{ext}"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return StreamingResponse(iter([content]), media_type=mime, headers=headers)
+
+# --- 既存: DELETE ---
 @router.delete("/transcripts/{tid}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_transcript(tid: int, db: Session = Depends(get_db)):
-    """
-    Permanently delete a transcript (and its cascading minutes_versions /
-    transcript_chunks thanks to ON DELETE CASCADE).
-    """
     tr = db.get(M.Transcript, tid)
     if not tr:
-        raise HTTPException(404, "Not found")
+        raise HTTPException(status_code=404, detail="Not found")
     db.delete(tr)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

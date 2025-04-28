@@ -7,3 +7,6 @@ pytest==8.1.1
 minio>=7.2.0
 boto3>=1.34.0
 # responses は shared に統合
+python-docx>=0.8.11
+markdown>=3.4.1
+weasyprint>=57.0
