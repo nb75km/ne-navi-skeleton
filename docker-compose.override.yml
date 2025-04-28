@@ -1,0 +1,4 @@
+services:
+  minutes:
+    volumes:
+      - ./backend:/app/backend        # <- これで versions/ が書き込まれる

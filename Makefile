@@ -17,3 +17,10 @@ etl-run:
 from shared.etl_dify import sync_dify; sync_dify.delay()
 print("Triggered ETL task")
 PY
+
+ALEMBIC = docker compose run --rm -w /app/backend/minutes_maker minutes alembic
+
+migrate-new:
+	$(ALEMBIC) revision -m "$(name)" --autogenerate
+migrate-up:
+	$(ALEMBIC) upgrade head
