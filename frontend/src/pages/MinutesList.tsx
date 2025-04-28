@@ -1,10 +1,171 @@
-import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { Plus, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import { Loader2, UploadCloud } from "lucide-react";
 import { json } from "../lib/api";
+import { StatusLamp } from "../components/StatusLamp";
 
-/* ---------- UploadDialog ---------- */
-function UploadDialog({ onDone }: { onDone: (fid: string) => void }) {
+/* -------------------- 型 -------------------- */
+export interface Transcript {
+  id: number;
+  file_id: string;
+  filename: string;
+  created_at: string;
+}
+
+type Phase = "stt" | "draft" | "ready" | "error";
+
+type ItemEx = Transcript & {
+  phase: Phase;
+  sttJobId?: string;
+  draftJobId?: string;
+};
+
+/* -------------------- ページ -------------------- */
+export default function MinutesList() {
+  const [items, setItems] = useState<ItemEx[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  /* setInterval の id を保持してアンマウント時に全て停止 */
+  const timers = useRef<number[]>([]);
+  useEffect(() => () => timers.current.forEach(clearInterval), []);
+
+  /* ---------- 初回ロード ---------- */
+  useEffect(() => {
+    json<{ items: Transcript[] }>(
+      "/minutes/api/transcripts?limit=100&order=desc"
+    ).then(({ items: list }) => {
+      setItems(list.map((x) => ({ ...x, phase: "ready" as const })));
+      setLoading(false);
+    });
+  }, []);
+
+  /* ---------- アップロード後コールバック ---------- */
+  const handleUploadSuccess = (info: {
+    fileId: string;
+    taskId: string;
+    filename: string;
+  }) => {
+    /* ❶ プレースホルダ行を即表示 */
+    setItems((prev) => [
+      {
+        id: -1,
+        file_id: info.fileId,
+        filename: info.filename,
+        created_at: new Date().toISOString(),
+        phase: "stt",
+        sttJobId: info.taskId,
+      },
+      ...prev,
+    ]);
+
+    /* ❷ Whisper ジョブをポーリング */
+    const pollStt = window.setInterval(async () => {
+      try {
+        const res = await fetch(`/minutes/api/jobs/${info.taskId}`);
+        if (!res.ok) return; // まだ完了していない
+
+        clearInterval(pollStt);
+
+        /* transcript 一覧を再取得して該当 file_id を探す */
+        const { items: list } = await json<{ items: Transcript[] }>( // ★ 修正
+          "/minutes/api/transcripts?limit=100&order=desc"
+        );
+        const tr = list.find((row) => row.file_id === info.fileId);
+        if (!tr) {
+          setItems((prev) =>
+            prev.map((it) =>
+              it.file_id === info.fileId ? { ...it, phase: "error" } : it
+            )
+          );
+          return;
+        }
+
+        /* プレースホルダ置換 → phase=draft */
+        setItems((prev) =>
+          prev.map((it) =>
+            it.file_id === info.fileId ? { ...tr, phase: "draft" } : it
+          )
+        );
+
+        /* GPT ドラフト生成を開始 */
+        const resp = await fetch(`/minutes/api/${tr.id}/draft`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        const { task_id: draftId } = await resp.json();
+
+        /* draft ジョブをポーリング */
+        const pollDraft = window.setInterval(async () => {
+          const r = await fetch(`/minutes/api/jobs/${draftId}`);
+          if (!r.ok) return;
+
+          clearInterval(pollDraft);
+          setItems((prev) =>
+            prev.map((it) =>
+              it.file_id === info.fileId ? { ...it, phase: "ready" } : it
+            )
+          );
+        }, 3000);
+        timers.current.push(pollDraft);
+      } catch {
+        clearInterval(pollStt);
+        setItems((prev) =>
+          prev.map((it) =>
+            it.file_id === info.fileId ? { ...it, phase: "error" } : it
+          )
+        );
+      }
+    }, 3000);
+    timers.current.push(pollStt);
+  };
+
+  /* -------------------- レンダリング -------------------- */
+  if (loading) {
+    return <Loader2 className="m-auto animate-spin" size={32} />;
+  }
+
+  return (
+    <div className="max-w-3xl mx-auto p-6 space-y-6">
+      <h1 className="text-xl font-semibold flex items-center gap-2">
+        Minutes
+        <UploadDialog onDone={handleUploadSuccess} />
+      </h1>
+
+      <ul className="space-y-2">
+        {items.map((t) => (
+          <li
+            key={`${t.file_id}-${t.phase}`}
+            className="border rounded p-3 hover:bg-gray-50"
+          >
+            {t.phase === "ready" ? (
+              <Link to={`/workspace/${t.id}`} className="flex items-center gap-2">
+                <span className="flex-1 truncate">{t.filename}</span>
+                <StatusLamp state="ready" />
+              </Link>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="flex-1 truncate text-gray-500">{t.filename}</span>
+                <StatusLamp state={t.phase} />
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/* -------------------- UploadDialog -------------------- */
+function UploadDialog({
+  onDone,
+}: {
+  onDone: (info: {
+    fileId: string;
+    taskId: string;
+    filename: string;
+  }) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
 
@@ -13,112 +174,61 @@ function UploadDialog({ onDone }: { onDone: (fid: string) => void }) {
     const file = e.target.files[0];
     setUploading(true);
 
-    const fd = new FormData();
-    fd.append("file", file);
-    const rsp = await fetch("/minutes/api/files", { method: "POST", body: fd });
-    const { file_id } = await rsp.json();
-    setUploading(false);
-    setOpen(false);
-    onDone(file_id);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const rsp = await fetch("/minutes/api/files", {
+        method: "POST",
+        body: fd,
+      });
+      if (!rsp.ok) throw new Error(await rsp.text());
+      const { file_id, task_id } = await rsp.json();
+
+      onDone({ fileId: file_id, taskId: task_id, filename: file.name });
+      setOpen(false);
+    } catch (err) {
+      alert("Upload failed: " + err);
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
     <>
       <button
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white rounded px-3 py-1 text-sm"
+        className="ml-auto flex items-center gap-1 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded px-3 py-1"
       >
-        <Plus size={16} /> Upload
+        <UploadCloud size={16} /> Upload
       </button>
 
       {open && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded shadow space-y-4">
-            <h2 className="font-semibold">Upload audio</h2>
+          <div className="bg-white rounded shadow-lg p-6 w-80 space-y-4">
+            <h2 className="text-lg font-semibold">Upload Audio</h2>
             <input type="file" accept="audio/*" onChange={handleFile} />
-            {uploading && <Loader2 className="animate-spin mx-auto" />}
-            <button
-              onClick={() => setOpen(false)}
-              className="text-sm text-gray-500 hover:underline"
-            >
-              Close
-            </button>
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setOpen(false)}
+                className="px-3 py-1 rounded border"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={uploading}
+                className="px-3 py-1 rounded bg-indigo-600 text-white disabled:opacity-60"
+              >
+                {uploading ? (
+                  <Loader2 className="animate-spin" size={16} />
+                ) : (
+                  "Upload"
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
     </>
-  );
-}
-
-/* ---------- MinutesList Page ---------- */
-interface Transcript {
-  id: number;
-  file_id: string;
-  filename: string;
-  created_at: string;
-}
-
-export default function MinutesList() {
-  const [items, setItems] = useState<Transcript[] | null>(null);
-  const navigate = useNavigate();
-
-  /* 一覧ロード */
-  useEffect(() => {
-    json<any>("/minutes/api/transcripts").then((resp) =>
-      setItems((resp.items ?? resp) as Transcript[]),
-    );
-  }, []);
-
-  /* 新規アップロード後の Draft 生成 → Workspace 遷移 */
-  const handleUploadSuccess = (fileId: string) => {
-    const poll = setInterval(async () => {
-      const t = await json<Transcript[]>(
-        `/minutes/api/transcripts?file_id=${fileId}`,
-      );
-      if (t.length) {
-        clearInterval(poll);
-        const transcript = t[0];
-
-        /* 初回 Draft を GPT で生成 */
-        await fetch(`/minutes/api/${transcript.id}/draft`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ model: "gpt-4o-mini" }),
-        });
-
-        navigate(`/workspace/${transcript.id}`);
-      }
-    }, 3000);
-  };
-
-  if (!items) return <Loader2 className="animate-spin m-4" />;
-
-  return (
-    <div className="p-4 space-y-4">
-      <div className="flex justify-between items-center">
-        <h1 className="text-xl font-bold">Transcripts</h1>
-        <UploadDialog onDone={handleUploadSuccess} />
-      </div>
-
-      <ul className="space-y-2">
-        {items.map((t) => (
-          <li
-            key={t.id}
-            className="border rounded p-3 hover:bg-gray-50 flex justify-between"
-          >
-            {/* ★ ここを TranscriptDetail ではなく Workspace へ */}
-            <Link
-              to={`/workspace/${t.id}`}
-              className="font-medium truncate max-w-xs"
-            >
-              {t.filename}
-            </Link>
-            <span className="text-xs text-gray-500">
-              {new Date(t.created_at).toLocaleString()}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
   );
 }
