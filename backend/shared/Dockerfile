@@ -1,6 +1,10 @@
-FROM python:3.12-slim
+FROM ne-navi-base:latest
+
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY celery_app.py .
-CMD ["celery","-A","celery_app","worker","-l","info","-Q","default"]
+# backend コンテキスト内の全コードを取り込む
+COPY . /app
+
+# chat_explorer を import できるように
+ENV PYTHONPATH=/app
+
+CMD ["celery", "-A", "shared.celery_app", "worker", "-B", "-l", "info"]

@@ -1,13 +1,26 @@
 services:
-  nginx:
-    build: ./nginx
-    ports:
-      - "80:80"
-    depends_on:
-      - chat
-      - minutes
+  # ---------------------------------------------------------------
+  # 0. 共通ベース (変更なし)
+  # ---------------------------------------------------------------
+  base:
+    image: ne-navi-base:latest
+    build:
+      context: .
+      dockerfile: backend/base/Dockerfile
     networks: [appnet]
 
+  # ---------------------------------------------------------------
+  # 1. リバプロ (変更なし)
+  # ---------------------------------------------------------------
+  nginx:
+    build: ./nginx
+    ports: ["80:80"]
+    depends_on: [chat, minutes, frontend]
+    networks: [appnet]
+
+  # ---------------------------------------------------------------
+  # 2. データベース & キュー (変更なし)
+  # ---------------------------------------------------------------
   postgres:
     image: pgvector/pgvector:0.7.4-pg16
     build:
@@ -18,10 +31,8 @@ services:
       - POSTGRES_PASSWORD=app
       - POSTGRES_DB=app
       - POSTGRES_INITDB_ARGS=--encoding=UTF8 --lc-collate=C --lc-ctype=C
-    volumes:
-      - db_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    volumes: [db_data:/var/lib/postgresql/data]
+    ports: ["5432:5432"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
       interval: 10s
@@ -33,36 +44,110 @@ services:
     image: redis:7
     networks: [appnet]
 
+  # ---------------------------------------------------------------
+  # 3. 追加 : MinIO (S3 互換オブジェクトストレージ)  ★
+  # ---------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Console
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      retries: 3
+    networks: [appnet]
+
+  # ---------------------------------------------------------------
+  # 4. バックエンド API 群 (MinIO に依存を追加)  ★
+  # ---------------------------------------------------------------
   chat:
     build:
       context: ./backend
       dockerfile: chat_explorer/Dockerfile
+    depends_on: [base, postgres, redis]
     env_file: .env
-    depends_on:
-      - postgres
-      - redis
     networks: [appnet]
 
   minutes:
-    build: ./backend/minutes_maker
+    build:
+      context: ./backend
+      dockerfile: minutes_maker/Dockerfile
+    depends_on: [base, postgres, redis, minio]   # ★
     env_file: .env
-    depends_on:
-      - postgres
-      - redis
     networks: [appnet]
+    volumes:
+      - uploads:/data/uploads        # ★追加
 
+  # ---------------------------------------------------------------
+  # 5. Celery ワーカ (shared)  ★名前を minutes_worker に変更しても OK
+  # ---------------------------------------------------------------
   celery:
-    build: ./backend/shared
-    command: celery -A celery_app worker -l info -Q default
+    build:
+      context: ./backend
+      dockerfile: shared/Dockerfile
+    command: celery -A shared.celery_app worker -B -l info
+    depends_on: [base, postgres, redis, minio]   # ★
     env_file: .env
-    depends_on:
-      - postgres
-      - redis
+    networks: [appnet]
+    volumes:
+      - uploads:/data/uploads        # ★追加
+
+  # オーディオ実ファイルは MinIO に入るので uploads volume はもう不要
+  # （Whisper 前の一時保存を残したい場合だけ残す）
+  # volumes:
+  #   - uploads:/data/uploads
+
+  # ---------------------------------------------------------------
+  # 6. マイグレーション (変更なし)
+  # ---------------------------------------------------------------
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: chat_explorer/Dockerfile
+    depends_on: [postgres]
+    volumes:
+      - .:/app
+    working_dir: /app/backend
+    environment:
+      PYTHONPATH: /app:/app/backend
+    env_file: .env
+    command: alembic upgrade head
     networks: [appnet]
 
+  # ---------------------------------------------------------------
+  # 7. フロントエンド (変更なし)
+  # ---------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: ne-navi-frontend:latest
+    restart: always
+    ports:
+      - "8080:80"
+    environment:
+      - VITE_BACKEND_BASE=
+    depends_on: [chat, minutes]
+    networks: [appnet]
+
+# ---------------------------------------------------------------
+# 8. ボリューム定義
+# ---------------------------------------------------------------
 volumes:
   db_data:
+  minio_data:   # ★MinIO 用永続ストレージ
+  uploads:
 
+# ---------------------------------------------------------------
+# 9. ネットワーク定義 (既存を維持)
+# ---------------------------------------------------------------
 networks:
   appnet:
     driver: bridge

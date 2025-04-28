@@ -1,0 +1,4 @@
+-r chat_explorer/requirements.txt
+-r minutes_maker/requirements.txt
+-r shared/requirements.txt
+pydantic-settings>=2.1.0
