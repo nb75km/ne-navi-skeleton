@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Loader2, UploadCloud } from "lucide-react";
+import { Loader2, UploadCloud, Trash2 } from "lucide-react";
 import { json } from "../lib/api";
 import { StatusLamp } from "../components/StatusLamp";
 
@@ -39,6 +39,22 @@ export default function MinutesList() {
     });
   }, []);
 
+  /* ---------- 削除 ---------- */
+  const deleteTranscript = async (id: number, fileId: string) => {
+    if (!confirm("選択したトランスクリプトを完全に削除します。よろしいですか？")) return;
+    try {
+      const rsp = await fetch(`/minutes/api/transcripts/${id}`, {
+        method: "DELETE",
+      });
+      if (!rsp.ok) throw new Error(await rsp.text());
+
+      // 楽観的に一覧から除外
+      setItems((prev) => prev.filter((it) => it.file_id !== fileId));
+    } catch (e: any) {
+      alert(e.message || e);
+    }
+  };
+
   /* ---------- アップロード後コールバック ---------- */
   const handleUploadSuccess = (info: {
     fileId: string;
@@ -67,7 +83,7 @@ export default function MinutesList() {
         clearInterval(pollStt);
 
         /* transcript 一覧を再取得して該当 file_id を探す */
-        const { items: list } = await json<{ items: Transcript[] }>( // ★ 修正
+        const { items: list } = await json<{ items: Transcript[] }>(
           "/minutes/api/transcripts?limit=100&order=desc"
         );
         const tr = list.find((row) => row.file_id === info.fileId);
@@ -139,13 +155,27 @@ export default function MinutesList() {
             className="border rounded p-3 hover:bg-gray-50"
           >
             {t.phase === "ready" ? (
-              <Link to={`/workspace/${t.id}`} className="flex items-center gap-2">
-                <span className="flex-1 truncate">{t.filename}</span>
+              <div className="flex items-center gap-2">
+                <Link
+                  to={`/workspace/${t.id}`}
+                  className="flex-1 truncate hover:underline"
+                >
+                  {t.filename}
+                </Link>
                 <StatusLamp state="ready" />
-              </Link>
+                <button
+                  onClick={() => deleteTranscript(t.id, t.file_id)}
+                  title="Delete"
+                  className="text-gray-400 hover:text-red-600"
+                >
+                  <Trash2 size={18} />
+                </button>
+              </div>
             ) : (
               <div className="flex items-center gap-2">
-                <span className="flex-1 truncate text-gray-500">{t.filename}</span>
+                <span className="flex-1 truncate text-gray-500">
+                  {t.filename}
+                </span>
                 <StatusLamp state={t.phase} />
               </div>
             )}
