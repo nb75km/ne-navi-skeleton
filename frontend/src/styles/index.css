@@ -2,23 +2,48 @@
 @tailwind components;
 @tailwind utilities;
 
-html, body, #root { height: 100%; }
-
-.w-md-editor {
-  display: flex;
-  flex-direction: column;
+/* 1) まずルートから高さを100%に */
+html, body, #root {
   height: 100%;
 }
 
-/* エディタ入力部を伸長 */
-.w-md-editor-text {
-  flex: 1;
-  height: auto !important;
-  overflow: auto;
+/* 2) MDEditor のルートをフル高さに */
+.w-md-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100% !important;
 }
 
-/* プレビュー部も同様に伸長 */
-.w-md-editor-preview {
-  flex: 1;
-  overflow: auto;
+/* 3) 入力＋プレビューを包むコンテナを左右 flex に */
+.w-md-editor-content {
+  display: flex !important;
+  flex: 1 1 0;
+  height: 100% !important;
+  overflow: hidden !important;
+  position: relative !important;
+  min-width: 0 !important;
 }
+
+/* 4) 左右の Pane を均等伸長＆スクロール可に */
+.w-md-editor-input,
+.w-md-editor-preview {
+  position: relative !important;   /* もともと absolute のプレビューを相対化 */
+  flex: 1 1 0 !important;          /* 両方とも残り幅を均等に取得 */
+  width: auto !important;          /* デフォルトの width:50% を解除 */
+  height: 100% !important;         /* コンテナいっぱい */
+  overflow: auto !important;       /* 独立スクロール */
+}
+
+/* flex 子要素を min-width:0 にして、幅を押し出さないようにする */
+.w-md-editor-input,
+.w-md-editor-preview {
+  min-width: 50% !important;
+}
+
+/* textarea の長い一行を自動折り返し */
+.w-md-editor-input textarea {
+  white-space: pre-wrap !important;   /* 改行ありならそのまま、なければ必要に応じて折り返し */
+  overflow-wrap: break-word !important; /* 単語の途中でも折り返す */
+}
+
+

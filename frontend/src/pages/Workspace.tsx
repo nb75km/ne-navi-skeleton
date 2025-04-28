@@ -160,7 +160,7 @@ function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
             onClick={() => askAI('todo')}
             className="flex items-center gap-1 text-sm bg-amber-600 hover:bg-amber-700 text-white rounded px-2 py-1"
           >
-            <ListTodo size={14} /> TODO 抽出
+            <ListTodo size={14} />
           </button>
           <button
             onClick={save}
@@ -173,13 +173,22 @@ function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
       </div>
 
       {/* editor */}
-      <div className="flex-1 overflow-hidden">
+      <div className="relative flex-1 overflow-hidden h-full">
         <MDEditor
+          height="100%"
+          className="h-full w-md-editor"
           value={content}
           onChange={v => setContent(v ?? '')}
           preview="live"
-          previewOptions={{ remarkPlugins: [remarkGfm] }}
-          textareaProps={{ className: 'text-gray-900 bg-white' }}
+          previewOptions={{
+            remarkPlugins: [remarkGfm],
+            className: 'h-full overflow-auto w-md-editor-preview',
+            style: { height: '100%' },
+          }}
+          textareaProps={{
+            className: 'text-gray-900 bg-white h-full w-md-editor-text',
+            style: { height: '100%' },
+          }}
         />
       </div>
     </div>
@@ -194,7 +203,7 @@ export default function Workspace() {
   if (!tid) return <p className="p-4 text-red-500">no transcriptId</p>;
 
   return (
-    <div className="h-screen">
+    <div className="h-screen flex">
       <ResizableTwoPane
         left={<ChatBotPanel ref={chatBotRef} />}
         right={
