@@ -3,3 +3,22 @@
 @tailwind utilities;
 
 html, body, #root { height: 100%; }
+
+.w-md-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* エディタ入力部を伸長 */
+.w-md-editor-text {
+  flex: 1;
+  height: auto !important;
+  overflow: auto;
+}
+
+/* プレビュー部も同様に伸長 */
+.w-md-editor-preview {
+  flex: 1;
+  overflow: auto;
+}

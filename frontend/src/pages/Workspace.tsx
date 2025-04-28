@@ -1,3 +1,5 @@
+// frontend/src/pages/Workspace.tsx
+
 import React, {
   useEffect,
   useRef,
@@ -11,9 +13,13 @@ import { Loader2, Send, Save, Sparkles, ListTodo } from 'lucide-react';
 import { json } from '../lib/api';
 import { ResizableTwoPane } from '../components/ResizableTwoPane';
 
+import MDEditor from '@uiw/react-md-editor';
+import '@uiw/react-md-editor/markdown-editor.css';
+import '@uiw/react-markdown-preview/markdown.css';
+import remarkGfm from 'remark-gfm';
+
 /* ---------- Chat (左カラム) ---------- */
 export interface ChatBotHandle {
-  /** 外部から任意のプロンプトを送信する */
   sendPrompt: (body: string) => Promise<void>;
 }
 
@@ -23,29 +29,26 @@ const ChatBotPanel = forwardRef<ChatBotHandle>((_, ref) => {
   const [loading, setLoading] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
-  useEffect(
-    () => endRef.current?.scrollIntoView({ behavior: 'smooth' }),
-    [messages]
-  );
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
-  /* 共通の送信ロジックを関数化 */
   const post = async (body: string) => {
-    const userMsg = { role: 'user', body };
-    setMessages((m) => [...m, userMsg]);
+    setMessages(m => [...m, { role: 'user', body }]);
     setLoading(true);
     try {
-      const r = await fetch('/minutes/api/agent', {
+      const res = await fetch('/minutes/api/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ body }),
       });
-      const data = await r.json();
-      setMessages((m) => [
+      const data = await res.json();
+      setMessages(m => [
         ...m,
         { role: 'assistant', body: data.body ?? data.assistant?.body },
       ]);
     } catch (e: any) {
-      setMessages((m) => [
+      setMessages(m => [
         ...m,
         { role: 'assistant', body: 'Error: ' + (e.message || e) },
       ]);
@@ -54,21 +57,13 @@ const ChatBotPanel = forwardRef<ChatBotHandle>((_, ref) => {
     }
   };
 
-  /* UI からの送信 */
   const send = () => {
     if (!input.trim()) return;
     post(input.trim());
     setInput('');
   };
 
-  /* ref 経由で外部から呼び出せるメソッドを公開 */
-  useImperativeHandle(
-    ref,
-    () => ({
-      sendPrompt: post,
-    }),
-    []
-  );
+  useImperativeHandle(ref, () => ({ sendPrompt: post }), []);
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -90,8 +85,8 @@ const ChatBotPanel = forwardRef<ChatBotHandle>((_, ref) => {
       <div className="border-t p-2 flex gap-2">
         <input
           value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && send()}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
           className="flex-1 border rounded px-3 py-2"
           placeholder="Ask anything…"
         />
@@ -100,11 +95,7 @@ const ChatBotPanel = forwardRef<ChatBotHandle>((_, ref) => {
           disabled={loading}
           className="bg-blue-600 hover:bg-blue-700 text-white px-3 rounded disabled:opacity-60"
         >
-          {loading ? (
-            <Loader2 className="animate-spin" size={16} />
-          ) : (
-            <Send size={16} />
-          )}
+          {loading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
         </button>
       </div>
     </div>
@@ -125,11 +116,11 @@ function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
   useEffect(() => {
     json<any[]>(
       `/minutes/api/minutes_versions?transcript_id=${transcriptId}`
-    ).then((v) => setContent(v.length ? v[0].markdown : '# (no draft)'));
+    ).then(v => setContent(v.length ? v[0].markdown : '# (no draft)'));
   }, [transcriptId]);
 
   const save = async () => {
-    if (!content) return;
+    if (content === null) return;
     setSaving(true);
     await fetch(`/minutes/api/minutes_versions?transcript_id=${transcriptId}`, {
       method: 'POST',
@@ -140,7 +131,6 @@ function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
     alert('Saved!');
   };
 
-  /* AI 推敲モード */
   const askAI = async (mode: 'simplify' | 'todo') => {
     if (!content) return;
     const prompt =
@@ -150,14 +140,16 @@ function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
     await chatBotRef.current?.sendPrompt(prompt);
   };
 
-  if (content === null) return <Loader2 className="m-auto animate-spin" />;
+  if (content === null) {
+    return <Loader2 className="m-auto animate-spin" />;
+  }
 
   return (
     <div className="flex flex-col h-full bg-gray-50">
-      <div className="border-b p-2 flex justify-between items-center gap-2">
-        <h2 className="font-semibold">Minutes Editor</h2>
+      {/* header */}
+      <div className="border-b p-2 flex justify-between items-center bg-white sticky top-0 z-10">
+        <h2 className="font-semibold text-gray-800">Minutes Editor</h2>
         <div className="flex gap-1">
-          {/* AI Buttons */}
           <button
             onClick={() => askAI('simplify')}
             className="flex items-center gap-1 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded px-2 py-1"
@@ -170,7 +162,6 @@ function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
           >
             <ListTodo size={14} /> TODO 抽出
           </button>
-          {/* Save */}
           <button
             onClick={save}
             disabled={saving}
@@ -180,11 +171,17 @@ function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
           </button>
         </div>
       </div>
-      <textarea
-        className="flex-1 p-4 font-mono text-sm bg-transparent outline-none resize-none"
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-      />
+
+      {/* editor */}
+      <div className="flex-1 overflow-hidden">
+        <MDEditor
+          value={content}
+          onChange={v => setContent(v ?? '')}
+          preview="live"
+          previewOptions={{ remarkPlugins: [remarkGfm] }}
+          textareaProps={{ className: 'text-gray-900 bg-white' }}
+        />
+      </div>
     </div>
   );
 }
@@ -200,7 +197,12 @@ export default function Workspace() {
     <div className="h-screen">
       <ResizableTwoPane
         left={<ChatBotPanel ref={chatBotRef} />}
-        right={<EditorPanel transcriptId={parseInt(tid, 10)} chatBotRef={chatBotRef} />}
+        right={
+          <EditorPanel
+            transcriptId={parseInt(tid, 10)}
+            chatBotRef={chatBotRef}
+          />
+        }
       />
     </div>
   );

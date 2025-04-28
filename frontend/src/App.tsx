@@ -6,6 +6,8 @@ import ChatDetail from "./pages/ChatDetail";
 import MinutesList from "./pages/MinutesList";
 // import TranscriptDetail from "./pages/TranscriptDetail";
 import Workspace from "./pages/Workspace";
+import "@uiw/react-md-editor/markdown-editor.css";
+import "@uiw/react-markdown-preview/markdown.css";
 
 export default function App() {
   return (
