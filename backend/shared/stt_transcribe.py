@@ -1,6 +1,7 @@
 """
 OpenAI Whisper で音声ファイルを文字起こしし、
-DB (transcripts / transcript_chunks) に保存する Celery タスク
+DB (transcripts / transcript_chunks) に保存し終えたら
+直ちに GPT で議事録ドラフトを生成する Celery タスク
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from sqlalchemy.orm import Session
 from shared.celery_app import celery_app
 from minutes_maker.app import SessionLocal
 from minutes_maker.app.db import models as M
+from shared.draft_minutes import generate_minutes_draft  # ← Whisper 完了後に呼び出す
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
@@ -36,7 +38,7 @@ s3 = boto3.client(
 )
 
 UPLOAD_DIR = Path("/data/uploads")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)  # ensure exists
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------------------------
 # Celery task
@@ -44,9 +46,10 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)  # ensure exists
 @celery_app.task(name="minutes.stt.transcribe")
 def transcribe_file(file_id: str) -> str:
     """
-    1. /data/uploads or MinIO から音声を取得
+    1. /data/uploads または MinIO から音声を取得
     2. Whisper (verbose_json + segment) で文字起こし
     3. transcripts / transcript_chunks に保存
+    4. 保存が成功したら draft_minutes.generate を非同期でキック
     """
     # ---- fetch object ------------------------------------------------------
     audio_bytes: Optional[bytes] = None
@@ -78,16 +81,16 @@ def transcribe_file(file_id: str) -> str:
         timestamp_granularities=["segment"],
     )
 
-    # TranscriptionVerbose オブジェクトは属性アクセス
     full_text: str = whisper_rsp.text.strip()
     language: str | None = getattr(whisper_rsp, "language", None)
 
     # ---- Persist to DB -----------------------------------------------------
+    transcript_id: Optional[int] = None
     sess: Session = SessionLocal()
     try:
         tr = M.Transcript(file_id=file_id, language=language, content=full_text)
         sess.add(tr)
-        sess.flush()
+        sess.flush()  # tr.id が付与される
 
         for seg in whisper_rsp.segments:
             sess.add(
@@ -100,6 +103,12 @@ def transcribe_file(file_id: str) -> str:
             )
 
         sess.commit()
-        return "ok"
+        transcript_id = tr.id
     finally:
         sess.close()
+
+    # ---- Kick draft generation --------------------------------------------
+    if transcript_id is not None:
+        generate_minutes_draft.delay(transcript_id)
+
+    return "ok"
