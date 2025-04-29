@@ -1,5 +1,3 @@
-// frontend/src/pages/Workspace.tsx
-
 import React, {
   useEffect,
   useRef,
@@ -20,120 +18,158 @@ import '@uiw/react-md-editor/markdown-editor.css';
 import '@uiw/react-markdown-preview/markdown.css';
 import remarkGfm from 'remark-gfm';
 
-/* ---------- Chat (左カラム) ---------- */
 export interface ChatBotHandle {
-  sendPrompt: (body: string) => Promise<void>;
+  sendPrompt: (
+    instruction: string
+  ) => Promise<{ chatResponse: string; editedMinutes: string; versionNo: number }>;
+  appendMessage: (role: 'assistant' | 'user', body: string) => void;
 }
 
-const ChatBotPanel = forwardRef<ChatBotHandle>((_, ref) => {
-  const [messages, setMessages] = useState<{ role: string; body: string }[]>([]);
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const endRef = useRef<HTMLDivElement>(null);
+interface ChatBotPanelProps {
+  content: string;
+}
 
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+const ChatBotPanel = forwardRef<ChatBotHandle, ChatBotPanelProps>(
+  ({ content }, ref) => {
+    const [messages, setMessages] = useState<{ role: string; body: string }[]>([]);
+    const [input, setInput] = useState('');
+    const [loading, setLoading] = useState(false);
+    const endRef = useRef<HTMLDivElement>(null);
 
-  const post = async (body: string) => {
-    setMessages(m => [...m, { role: 'user', body }]);
-    setLoading(true);
-    try {
-      const res = await fetch('/minutes/api/agent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body }),
-      });
-      const data = await res.json();
-      setMessages(m => [
-        ...m,
-        { role: 'assistant', body: data.body ?? data.assistant?.body },
-      ]);
-    } catch (e: any) {
-      setMessages(m => [
-        ...m,
-        { role: 'assistant', body: 'Error: ' + (e.message || e) },
-      ]);
-    } finally {
-      setLoading(false);
-    }
-  };
+    // 会話履歴を localStorage から復元
+    useEffect(() => {
+      const saved = localStorage.getItem('minutesMessages');
+      if (saved) setMessages(JSON.parse(saved));
+    }, []);
 
-  const send = () => {
-    if (!input.trim()) return;
-    post(input.trim());
-    setInput('');
-  };
+    // ローカル保存 & スクロール
+    useEffect(() => {
+      localStorage.setItem('minutesMessages', JSON.stringify(messages));
+      endRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [messages]);
 
-  useImperativeHandle(ref, () => ({ sendPrompt: post }), []);
+    const post = async (
+      instruction: string
+    ): Promise<{ chatResponse: string; editedMinutes: string; versionNo: number }> => {
+      setMessages((m) => [...m, { role: 'user', body: instruction }]);
+      setLoading(true);
 
-  return (
-    <div className="flex flex-col h-full bg-white">
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            className={
-              m.role === 'user'
-                ? 'self-end bg-blue-600 text-white rounded-lg px-3 py-2 max-w-xs'
-                : 'self-start bg-gray-100 text-gray-900 rounded-lg px-3 py-2 max-w-xs'
-            }
+      // 全文＋命令を組み合わせ
+      const fullBody = [
+        '以下は現在の議事録全文です。',
+        'CONTENT_START',
+        content,
+        'CONTENT_END',
+        '指示:',
+        instruction,
+      ].join('\n');
+
+      try {
+        const res = await fetch('/minutes/api/agent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ body: fullBody }),
+        });
+        const data = await res.json();
+        const { chatResponse, editedMinutes, versionNo } = data;
+        setMessages((m) => [...m, { role: 'assistant', body: chatResponse }]);
+        return { chatResponse, editedMinutes, versionNo };
+      } catch (e: any) {
+        const err = 'Error: ' + (e.message || e);
+        setMessages((m) => [...m, { role: 'assistant', body: err }]);
+        return { chatResponse: err, editedMinutes: '', versionNo: -1 };
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const appendMessage = (role: 'assistant' | 'user', body: string) => {
+      setMessages((m) => [...m, { role, body }]);
+    };
+
+    useImperativeHandle(
+      ref,
+      () => ({ sendPrompt: post, appendMessage }),
+      []
+    );
+
+    const send = () => {
+      if (!input.trim()) return;
+      post(input.trim());
+      setInput('');
+    };
+
+    return (
+      <div className="flex flex-col h-full bg-white">
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {messages.map((m, i) => (
+            <div
+              key={i}
+              className={
+                m.role === 'user'
+                  ? 'self-end bg-blue-600 text-white rounded-lg px-3 py-2 max-w-xs'
+                  : 'self-start bg-gray-100 text-gray-900 rounded-lg px-3 py-2 max-w-xs'
+              }
+            >
+              {m.body}
+            </div>
+          ))}
+          <div ref={endRef} />
+        </div>
+        <div className="border-t p-2 flex gap-2">
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && send()}
+            className="flex-1 border rounded px-3 py-2"
+            placeholder="Ask anything…"
+          />
+          <button
+            onClick={send}
+            disabled={loading}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-3 rounded disabled:opacity-60"
           >
-            {m.body}
-          </div>
-        ))}
-        <div ref={endRef} />
+            {loading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
+          </button>
+        </div>
       </div>
-      <div className="border-t p-2 flex gap-2">
-        <input
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
-          className="flex-1 border rounded px-3 py-2"
-          placeholder="Ask anything…"
-        />
-        <button
-          onClick={send}
-          disabled={loading}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-3 rounded disabled:opacity-60"
-        >
-          {loading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
-        </button>
-      </div>
-    </div>
-  );
-});
+    );
+  }
+);
 ChatBotPanel.displayName = 'ChatBotPanel';
 
-/* ---------- Editor (右カラム) ---------- */
 interface EditorProps {
   transcriptId: number;
+  content: string | null;
+  setContent: (c: string) => void;
   chatBotRef: RefObject<ChatBotHandle>;
 }
-function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
-  const [content, setContent] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  // ★ どのバージョンかを保持する state を追加
-  const [versionId, setVersionId] = useState<number | null>(null);
 
-  /* 初期ドラフト取得 */
+function EditorPanel({
+  transcriptId,
+  content,
+  setContent,
+  chatBotRef,
+}: EditorProps) {
+  const [saving, setSaving] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [versionNo, setVersionNo] = useState<number | null>(null);
+
   useEffect(() => {
-    json<any[]>(
-      `/minutes/api/minutes_versions?transcript_id=${transcriptId}`
-    ).then(v => {
-      if (v.length) {
-        // 取得した最初のバージョンの id と markdown をセット
-        setVersionId(v[0].id);
-        setContent(v[0].markdown);
-      } else {
-        setVersionId(null);
-        setContent('# (no draft)');
+    json<any[]>(`/minutes/api/minutes_versions?transcript_id=${transcriptId}`).then(
+      (v) => {
+        if (v.length) {
+          setVersionNo(v[0].version_no);
+          setContent(v[0].markdown);
+        } else {
+          setVersionNo(null);
+          setContent('# (no draft)');
+        }
       }
-    });
-  }, [transcriptId]);
+    );
+  }, [transcriptId, setContent]);
 
   const save = async () => {
-    if (content === null) return;
     setSaving(true);
     await fetch(`/minutes/api/minutes_versions?transcript_id=${transcriptId}`, {
       method: 'POST',
@@ -146,11 +182,21 @@ function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
 
   const askAI = async (mode: 'simplify' | 'todo') => {
     if (!content) return;
-    const prompt =
+    const instruction =
       mode === 'simplify'
-        ? `以下の議事録をより簡潔に要約してください。\n\n${content}`
-        : `以下の議事録から今後のアクションアイテム (TODO) を箇条書きで抽出してください。\n\n${content}`;
-    await chatBotRef.current?.sendPrompt(prompt);
+        ? '以下の議事録をより簡潔に要約してください。'
+        : '以下の議事録からTODOを抽出してください。';
+
+    setAiLoading(true);
+    try {
+      const { chatResponse, editedMinutes, versionNo: newVer } =
+        await chatBotRef.current!.sendPrompt(instruction);
+      chatBotRef.current!.appendMessage('assistant', chatResponse);
+      setContent(editedMinutes);
+      if (newVer > 0) setVersionNo(newVer);
+    } finally {
+      setAiLoading(false);
+    }
   };
 
   if (content === null) {
@@ -159,47 +205,44 @@ function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
 
   return (
     <div className="flex flex-col h-full bg-gray-50">
-      {/* header */}
       <div className="border-b p-2 flex justify-between items-center bg-white sticky top-0 z-10">
         <h2 className="font-semibold text-gray-800">Minutes Editor</h2>
         <div className="flex gap-1">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-bold">
-              {versionId !== null ? `Minutes #${versionId}` : 'No Draft'}
-            </h2>
-            <ExportButton
-              versionId={versionId ?? 0}
-            />
+          <div className="flex items-center space-x-4">
+            <span className="text-xl font-bold">
+              {versionNo !== null ? `Version ${versionNo}` : 'No Draft'}
+            </span>
+            <ExportButton versionId={versionNo ?? 0} />
           </div>
-          <button
-            onClick={() => askAI('simplify')}
-            className="flex items-center gap-1 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded px-2 py-1"
-          >
-            <Sparkles size={14} /> 簡潔に
-          </button>
-          <button
-            onClick={() => askAI('todo')}
-            className="flex items-center gap-1 text-sm bg-amber-600 hover:bg-amber-700 text-white rounded px-2 py-1"
-          >
-            <ListTodo size={14} /> TODO抽出
-          </button>
-          <button
-            onClick={save}
-            disabled={saving}
-            className="text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded px-3 py-1 disabled:opacity-60"
-          >
-            {saving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
-          </button>
+          <div className="flex gap-1">
+            <button
+              onClick={() => askAI('simplify')}
+              disabled={saving || aiLoading}
+              className="flex items-center gap-1 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded px-2 py-1 disabled:opacity-60"
+            >
+              <Sparkles size={14} /> 簡潔に
+            </button>
+            <button
+              onClick={() => askAI('todo')}
+              disabled={saving || aiLoading}
+              className="flex items-center gap-1 text-sm bg-amber-600 hover:bg-amber-700 text-white rounded px-2 py-1 disabled:opacity-60"
+            >
+              <ListTodo size={14} /> TODO抽出
+            </button>
+            <button
+              onClick={save}
+              disabled={saving || aiLoading}
+              className="text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded px-3 py-1 disabled:opacity-60"
+            >
+              {saving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
+            </button>
+          </div>
         </div>
       </div>
-
-      {/* editor */}
       <div className="relative flex-1 overflow-hidden h-full">
         <MDEditor
-          height="100%"
-          className="h-full w-md-editor"
           value={content}
-          onChange={v => setContent(v ?? '')}
+          onChange={(v) => setContent(v ?? '')}
           preview="live"
           previewOptions={{
             remarkPlugins: [remarkGfm],
@@ -207,18 +250,25 @@ function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
             style: { height: '100%' },
           }}
           textareaProps={{
+            readOnly: aiLoading,
             className: 'text-gray-900 bg-white h-full w-md-editor-text',
             style: { height: '100%' },
           }}
         />
+        {aiLoading && (
+          <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10">
+            <Loader2 className="animate-spin" size={24} />
+            <span className="ml-2 text-lg text-gray-700">AI応答待ち…</span>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-/* ---------- Workspace ---------- */
 export default function Workspace() {
   const { tid } = useParams<{ tid: string }>();
+  const [content, setContent] = useState<string | null>(null);
   const chatBotRef = useRef<ChatBotHandle>(null);
 
   if (!tid) return <p className="p-4 text-red-500">no transcriptId</p>;
@@ -226,10 +276,12 @@ export default function Workspace() {
   return (
     <div className="h-screen flex">
       <ResizableTwoPane
-        left={<ChatBotPanel ref={chatBotRef} />}
+        left={<ChatBotPanel content={content ?? ''} ref={chatBotRef} />}
         right={
           <EditorPanel
             transcriptId={parseInt(tid, 10)}
+            content={content}
+            setContent={setContent}
             chatBotRef={chatBotRef}
           />
         }
