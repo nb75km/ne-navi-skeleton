@@ -1,4 +1,5 @@
 import React from "react";
+import { QueryProvider } from "./lib/queryClient";
 import { HashRouter as Router, Routes, Route } from "react-router-dom";
 import PortalHome from "./pages/PortalHome";
 import ChatList from "./pages/ChatList";
@@ -12,16 +13,19 @@ import "@uiw/react-markdown-preview/markdown.css";
 
 export default function App() {
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<PortalHome />} />
-        <Route path="/chat" element={<ChatList />} />
-        <Route path="/chat/:id" element={<ChatDetail />} />
-        <Route path="/minutes" element={<MinutesList />} />
-        {/* <Route path="/minutes/:id" element={<TranscriptDetail />} /> */}
-        <Route path="/workspace/:tid" element={<Workspace />} />
-        <Route path="/minutes/:id/diff" element={<TranscriptDiff />} />
-      </Routes>
-    </Router>
+    <QueryProvider>
+      <Router>
+        <Routes>
+          {/* existing routes remain unchanged */}
+          <Route path="/" element={<PortalHome />} />
+          <Route path="/chat" element={<ChatList />} />
+          <Route path="/chat/:id" element={<ChatDetail />} />
+          <Route path="/minutes" element={<MinutesList />} />
+          <Route path="/workspace/:tid" element={<Workspace />} />
+          <Route path="/minutes/:id/diff" element={<TranscriptDiff />} />
+        </Routes>
+      </Router>
+    </QueryProvider>
   );
 }
+

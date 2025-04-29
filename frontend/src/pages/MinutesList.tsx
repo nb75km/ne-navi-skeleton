@@ -20,120 +20,190 @@ type ItemEx = Transcript & {
   draftJobId?: string;
 };
 
+/* -------------------- LocalStorage Helpers -------------------- */
+const LS_KEY = "minutes_items";
+const loadLS = (): ItemEx[] => {
+  try {
+    return JSON.parse(localStorage.getItem(LS_KEY) || "[]");
+  } catch {
+    return [];
+  }
+};
+const saveLS = (items: ItemEx[]) =>
+  localStorage.setItem(LS_KEY, JSON.stringify(items));
+
 /* -------------------- ページ -------------------- */
 export default function MinutesList() {
-  const [items, setItems] = useState<ItemEx[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<ItemEx[]>(loadLS);
+  const [loading, setLoading] = useState(items.length === 0);
 
-  /* setInterval の id を保持してアンマウント時に全て停止 */
+  /* setInterval の id を保持してアンマウント時に停止 */
   const timers = useRef<number[]>([]);
   useEffect(() => () => timers.current.forEach(clearInterval), []);
 
-  /* ---------- 初回ロード ---------- */
+  /* ------ 状態が変わるたび localStorage へ反映 ------ */
+  useEffect(() => saveLS(items), [items]);
+
+  /* ---------- 初回ロード (Transcripts + Jobs) ---------- */
   useEffect(() => {
-    json<{ items: Transcript[] }>(
-      "/minutes/api/transcripts?limit=100&order=desc"
-    ).then(({ items: list }) => {
-      setItems(list.map((x) => ({ ...x, phase: "ready" as const })));
+    (async () => {
+      // ❶ 既存 transcript を取得
+      const { items: list } = await json<{ items: Transcript[] }>(
+        "/minutes/api/transcripts?limit=100&order=desc"
+      );
+
+      // ❷ 進行中 Job を取得
+      const jobs = await json<
+        {
+          id: string;
+          transcript_id: number | null;
+          status: "PENDING" | "PROCESSING" | "DRAFT_READY" | "FAILED";
+          created_at: string;
+          task_id: string;
+        }[]
+      >("/minutes/api/jobs");
+
+      /* Transcript に紐づくジョブ進捗を phase に変換 */
+      const jobMap = new Map<string, ItemEx>();
+      jobs.forEach((j) => {
+        const phase: Phase =
+          j.status === "DRAFT_READY"
+            ? "ready"
+            : j.status === "FAILED"
+            ? "error"
+            : j.status === "PROCESSING"
+            ? "draft"
+            : "stt";
+        jobMap.set(j.task_id, {
+          id: j.transcript_id ?? -1,
+          file_id: j.id,
+          filename: "(processing)",
+          created_at: j.created_at,
+          phase,
+          sttJobId: j.task_id,
+        });
+      });
+
+      // list を ItemEx に変換
+      const merged = list.map<ItemEx>((t) => ({
+        ...t,
+        phase: "ready",
+      }));
+
+      /* jobs 側でまだ transcript が無いものをプレースホルダとして追加 */
+      for (const job of jobMap.values()) {
+        const exists = merged.find((m) => m.sttJobId === job.sttJobId);
+        if (!exists) merged.unshift(job);
+      }
+
+      setItems(merged);
       setLoading(false);
-    });
+
+      /* ❸ 未完了ジョブのポーリングを再開 */
+      merged
+        .filter((it) => it.phase !== "ready" && it.phase !== "error")
+        .forEach((it) =>
+          startPolling(it.sttJobId!, it.file_id, it.phase === "draft")
+        );
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /* ---------- ジョブポーリング ---------- */
+  const startPolling = (jobId: string, fileId: string, draftAlready = false) => {
+    /* Whisper or Draft どちらのジョブかは draftAlready で分岐 */
+    const poll = window.setInterval(async () => {
+      const res = await fetch(`/minutes/api/jobs/${jobId}`);
+      if (!res.ok) return; // まだ
+      clearInterval(poll);
+
+      if (!draftAlready) {
+        /* Whisper 完了 → transcript 再取得してプレースホルダ置換 */
+        const { items: list } = await json<{ items: Transcript[] }>(
+          "/minutes/api/transcripts?limit=100&order=desc"
+        );
+        const tr = list.find((row) => row.file_id === fileId);
+        if (!tr) {
+          setItems((prev) =>
+            prev.map((it) =>
+              it.file_id === fileId ? { ...it, phase: "error" } : it
+            )
+          );
+          return;
+        }
+        /* phase = draft */
+        setItems((prev) =>
+          prev.map((it) =>
+            it.file_id === fileId
+              ? { ...tr, phase: "draft", sttJobId: jobId }
+              : it
+          )
+        );
+
+        /* Draft 生成開始 */
+        const resp = await fetch(`/minutes/api/${tr.id}/draft`, {
+          method: "POST",
+        });
+        if (!resp.ok) {
+          setItems((prev) =>
+            prev.map((it) =>
+              it.file_id === fileId ? { ...it, phase: "error" } : it
+            )
+          );
+          return;
+        }
+        const { task_id: draftId } = await resp.json();
+        startPolling(draftId, fileId, true);
+      } else {
+        /* Draft 完了 */
+        setItems((prev) =>
+          prev.map((it) =>
+            it.file_id === fileId ? { ...it, phase: "ready" } : it
+          )
+        );
+      }
+    }, 3000);
+    timers.current.push(poll);
+  };
 
   /* ---------- 削除 ---------- */
   const deleteTranscript = async (id: number, fileId: string) => {
-    if (!confirm("選択したトランスクリプトを完全に削除します。よろしいですか？")) return;
+    if (!confirm("選択したトランスクリプトを完全に削除します。よろしいですか？"))
+      return;
     try {
       const rsp = await fetch(`/minutes/api/transcripts/${id}`, {
         method: "DELETE",
       });
       if (!rsp.ok) throw new Error(await rsp.text());
 
-      // 楽観的に一覧から除外
       setItems((prev) => prev.filter((it) => it.file_id !== fileId));
     } catch (e: any) {
       alert(e.message || e);
     }
   };
 
-  /* ---------- アップロード後コールバック ---------- */
-  const handleUploadSuccess = (info: {
+  /* ---------- アップロード成功時 ---------- */
+  const handleUploadSuccess = ({
+    fileId,
+    taskId,
+    filename,
+  }: {
     fileId: string;
     taskId: string;
     filename: string;
   }) => {
-    /* ❶ プレースホルダ行を即表示 */
     setItems((prev) => [
       {
         id: -1,
-        file_id: info.fileId,
-        filename: info.filename,
+        file_id: fileId,
+        filename,
         created_at: new Date().toISOString(),
         phase: "stt",
-        sttJobId: info.taskId,
+        sttJobId: taskId,
       },
       ...prev,
     ]);
-
-    /* ❷ Whisper ジョブをポーリング */
-    const pollStt = window.setInterval(async () => {
-      try {
-        const res = await fetch(`/minutes/api/jobs/${info.taskId}`);
-        if (!res.ok) return; // まだ完了していない
-
-        clearInterval(pollStt);
-
-        /* transcript 一覧を再取得して該当 file_id を探す */
-        const { items: list } = await json<{ items: Transcript[] }>(
-          "/minutes/api/transcripts?limit=100&order=desc"
-        );
-        const tr = list.find((row) => row.file_id === info.fileId);
-        if (!tr) {
-          setItems((prev) =>
-            prev.map((it) =>
-              it.file_id === info.fileId ? { ...it, phase: "error" } : it
-            )
-          );
-          return;
-        }
-
-        /* プレースホルダ置換 → phase=draft */
-        setItems((prev) =>
-          prev.map((it) =>
-            it.file_id === info.fileId ? { ...tr, phase: "draft" } : it
-          )
-        );
-
-        /* GPT ドラフト生成を開始 */
-        const resp = await fetch(`/minutes/api/${tr.id}/draft`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-        });
-        if (!resp.ok) throw new Error(await resp.text());
-        const { task_id: draftId } = await resp.json();
-
-        /* draft ジョブをポーリング */
-        const pollDraft = window.setInterval(async () => {
-          const r = await fetch(`/minutes/api/jobs/${draftId}`);
-          if (!r.ok) return;
-
-          clearInterval(pollDraft);
-          setItems((prev) =>
-            prev.map((it) =>
-              it.file_id === info.fileId ? { ...it, phase: "ready" } : it
-            )
-          );
-        }, 3000);
-        timers.current.push(pollDraft);
-      } catch {
-        clearInterval(pollStt);
-        setItems((prev) =>
-          prev.map((it) =>
-            it.file_id === info.fileId ? { ...it, phase: "error" } : it
-          )
-        );
-      }
-    }, 3000);
-    timers.current.push(pollStt);
+    startPolling(taskId, fileId);
   };
 
   /* -------------------- レンダリング -------------------- */
@@ -186,7 +256,7 @@ export default function MinutesList() {
   );
 }
 
-/* -------------------- UploadDialog -------------------- */
+/* -------------------- UploadDialog (既存) -------------------- */
 function UploadDialog({
   onDone,
 }: {
