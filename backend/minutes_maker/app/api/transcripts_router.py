@@ -2,6 +2,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from weasyprint import HTML
+from docx import Document
+from io import BytesIO
+import markdown as md
 
 from ..db import SessionLocal, models as M
 from ..service import export_file
@@ -59,25 +63,48 @@ def get_transcript(tid: int, db: Session = Depends(get_db)):
     }
 
 # --- 新規: EXPORT ---
-@router.get("/transcripts/{tid}/export", status_code=status.HTTP_200_OK)
-def export_transcript(
-    tid: int,
-    format: str = Query(..., description="export format: markdown|docx|pdf|html"),
-    db: Session = Depends(get_db),
-):
-    allowed = {"markdown", "docx", "pdf", "html"}
-    if format not in allowed:
-        raise HTTPException(status_code=400, detail="Unsupported format")
+@router.get("/minutes/{version_id}/export")
+def export_minutes(version_id: int, format: str):
+    """
+    Export minutes_version markdown as md/docx/pdf.
+    format: 'md' | 'docx' | 'pdf'
+    """
+    sess = SessionLocal()
+    mv = sess.query(M.MinutesVersion).filter_by(id=version_id).first()
+    if not mv:
+        raise HTTPException(404, "Minutes version not found")
+    source_md = mv.markdown
 
-    try:
-        content, mime = export_file(tid, format)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Export error: {e}")
+    if format == "md":
+        return Response(source_md, media_type="text/markdown",
+                        headers={"Content-Disposition": f"attachment; filename=minutes_{version_id}.md"})
 
-    ext = "md" if format == "markdown" else format
-    filename = f"transcript_{tid}.{ext}"
-    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
-    return StreamingResponse(iter([content]), media_type=mime, headers=headers)
+    if format == "html":
+        html = md.markdown(source_md)
+        return Response(html, media_type="text/html",
+                        headers={"Content-Disposition": f"attachment; filename=minutes_{version_id}.html"})
+
+    if format == "pdf":
+        html = md.markdown(source_md)
+        pdf_io = BytesIO()
+        HTML(string=html).write_pdf(pdf_io)
+        pdf_io.seek(0)
+        return StreamingResponse(pdf_io, media_type="application/pdf",
+                                 headers={"Content-Disposition": f"attachment; filename=minutes_{version_id}.pdf"})
+
+    if format == "docx":
+        doc = Document()
+        for line in source_md.split("\n"):
+            # 単純追加。必要に応じて見出し等を判定してスタイルを適用
+            doc.add_paragraph(line)
+        doc_io = BytesIO()
+        doc.save(doc_io)
+        doc_io.seek(0)
+        return StreamingResponse(doc_io,
+                                 media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                 headers={"Content-Disposition": f"attachment; filename=minutes_{version_id}.docx"})
+
+    raise HTTPException(400, "Unsupported format")
 
 # --- 既存: DELETE ---
 @router.delete("/transcripts/{tid}", status_code=status.HTTP_204_NO_CONTENT)

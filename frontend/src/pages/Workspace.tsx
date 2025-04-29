@@ -12,6 +12,7 @@ import { useParams } from 'react-router-dom';
 import { Loader2, Send, Save, Sparkles, ListTodo } from 'lucide-react';
 import { json } from '../lib/api';
 import { ResizableTwoPane } from '../components/ResizableTwoPane';
+import { ExportButton } from '../components/ExportButton';
 
 import MDEditor from '@uiw/react-md-editor';
 import '@uiw/react-md-editor/markdown-editor.css';
@@ -111,12 +112,23 @@ interface EditorProps {
 function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
   const [content, setContent] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // ★ どのバージョンかを保持する state を追加
+  const [versionId, setVersionId] = useState<number | null>(null);
 
   /* 初期ドラフト取得 */
   useEffect(() => {
     json<any[]>(
       `/minutes/api/minutes_versions?transcript_id=${transcriptId}`
-    ).then(v => setContent(v.length ? v[0].markdown : '# (no draft)'));
+    ).then(v => {
+      if (v.length) {
+        // 取得した最初のバージョンの id と markdown をセット
+        setVersionId(v[0].id);
+        setContent(v[0].markdown);
+      } else {
+        setVersionId(null);
+        setContent('# (no draft)');
+      }
+    });
   }, [transcriptId]);
 
   const save = async () => {
@@ -150,6 +162,14 @@ function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
       <div className="border-b p-2 flex justify-between items-center bg-white sticky top-0 z-10">
         <h2 className="font-semibold text-gray-800">Minutes Editor</h2>
         <div className="flex gap-1">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-bold">
+              {versionId !== null ? `Minutes #${versionId}` : 'No Draft'}
+            </h2>
+            <ExportButton
+              versionId={versionId ?? 0}
+            />
+          </div>
           <button
             onClick={() => askAI('simplify')}
             className="flex items-center gap-1 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded px-2 py-1"
@@ -160,7 +180,7 @@ function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
             onClick={() => askAI('todo')}
             className="flex items-center gap-1 text-sm bg-amber-600 hover:bg-amber-700 text-white rounded px-2 py-1"
           >
-            <ListTodo size={14} />
+            <ListTodo size={14} /> TODO抽出
           </button>
           <button
             onClick={save}

@@ -19,7 +19,7 @@ def export_file(tid: int, fmt: str) -> tuple[bytes, str]:
     if not transcript:
         raise ValueError("Transcript not found")
 
-    # ここではトランスクリプトの content を Markdown テキストとして扱う
+    # トランスクリプトの content を Markdown テキストとして扱う
     text = transcript.content
 
     if fmt == "markdown":
@@ -38,7 +38,24 @@ def export_file(tid: int, fmt: str) -> tuple[bytes, str]:
 
     elif fmt == "pdf":
         # Markdown → HTML → PDF
-        html = md.markdown(text)
+        html_fragment = md.markdown(text)
+        # <html> でラップし charset とフォントを指定
+        html = f"""<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8"/>
+  <style>
+    @page {{ size: A4; margin: 1cm; }}
+    body {{ font-family: 'IPAPGothic', 'Noto Sans CJK JP', sans-serif; }}
+    h1, h2, h3, h4 {{ font-weight: bold; }}
+    ul {{ list-style: disc; margin-left: 1.5em; }}
+  </style>
+</head>
+<body>
+  {html_fragment}
+</body>
+</html>
+"""
         pdf = HTML(string=html).write_pdf()
         return pdf, "application/pdf"
 
