@@ -128,6 +128,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        KEEP_CONSOLE: "true"
     image: ne-navi-frontend:latest
     restart: always
     ports:
@@ -136,6 +138,7 @@ services:
       - VITE_BACKEND_BASE=
     depends_on: [chat, minutes]
     networks: [appnet]
+
 
 # ---------------------------------------------------------------
 # 8. ボリューム定義

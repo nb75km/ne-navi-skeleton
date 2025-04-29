@@ -2,6 +2,9 @@
 FROM --platform=$BUILDPLATFORM node:20-bookworm-slim AS build
 WORKDIR /app
 
+ARG KEEP_CONSOLE=false
+ENV KEEP_CONSOLE=${KEEP_CONSOLE}
+
 # --- 依存インストール --------------------------------------------------- #
 # package.json / lock-file だけ先にコピーしてキャッシュ活用
 COPY package.json package-lock.json* ./

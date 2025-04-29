@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// frontend/src/pages/Workspace.tsx  – バージョン切替 & AI チャット編集
+// frontend/src/pages/Workspace.tsx – バージョン切替 & AI チャット編集
 // ---------------------------------------------------------------------------
 import React, {
   useEffect,
@@ -7,22 +7,20 @@ import React, {
   useState,
   forwardRef,
   useImperativeHandle,
-  RefObject,
-  useCallback,
-} from 'react';
-import { useParams } from 'react-router-dom';
-import { Loader2, Send, Save, Wand2 } from 'lucide-react';
+} from "react";
+import { useParams } from "react-router-dom";
+import { Loader2, Send, Save, Wand2 } from "lucide-react";
 
-import { ResizableTwoPane } from '../components/ResizableTwoPane';
-import { ExportButton } from '../components/ExportButton';
-import VersionSelector from '../components/VersionSelector';
-import { useMinutesVersions } from '../lib/useMinutesVersions';
-import { ChatMessage, postChat } from '../lib/api';
+import { ResizableTwoPane } from "../components/ResizableTwoPane";
+import { ExportButton } from "../components/ExportButton";
+import VersionSelector from "../components/VersionSelector";
+import { useMinutesVersions } from "../lib/useMinutesVersions";
+import { ChatMessage, postChat } from "../lib/api";
 
-import MDEditor from '@uiw/react-md-editor';
-import '@uiw/react-md-editor/markdown-editor.css';
-import '@uiw/react-markdown-preview/markdown.css';
-import remarkGfm from 'remark-gfm';
+import MDEditor from "@uiw/react-md-editor";
+import "@uiw/react-md-editor/markdown-editor.css";
+import "@uiw/react-markdown-preview/markdown.css";
+import remarkGfm from "remark-gfm";
 
 /* -------------------------------------------------------------------------
  * ChatBotPanel
@@ -34,43 +32,42 @@ export interface ChatBotHandle {
 const ChatBotPanel = forwardRef<ChatBotHandle, { content: () => string }>(
   ({ content }, ref) => {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
-    const [input, setInput] = useState('');
+    const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
     const endRef = useRef<HTMLDivElement>(null);
 
+    /* スクロール追従 */
     useEffect(() => {
-      endRef.current?.scrollIntoView({ behavior: 'smooth' });
+      endRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
 
+    /* API 呼び出し */
     const post = async (body: string) => {
-      const next = [...messages, { role: 'user', content: body }];
+      const next = [...messages, { role: "user", content: body }];
       setMessages(next);
       setLoading(true);
 
       try {
-        // API 呼び出し
         const res = await postChat(
-          /* transcriptId は Workspace から context 経由で渡す方法でも良い */
           (window as any).__CURRENT_TID__,
           {
-            messages: next.filter((m) => m.role === 'user'),
+            messages: next.filter((m) => m.role === "user"),
             user_input: body,
           }
         );
 
         setMessages([
           ...next,
-          { role: 'assistant', content: res.assistant_message },
+          { role: "assistant", content: res.assistant_message },
         ]);
 
-        // minutes が更新された場合はエディタ側に反映させる
         if (res.markdown) {
           (window as any).__ON_MARKDOWN_UPDATE__(res.markdown, res.version_id);
         }
       } catch (e: any) {
         setMessages([
           ...next,
-          { role: 'assistant', content: 'Error: ' + (e?.message || e) },
+          { role: "assistant", content: `Error: ${e?.message || e}` },
         ]);
       } finally {
         setLoading(false);
@@ -82,7 +79,7 @@ const ChatBotPanel = forwardRef<ChatBotHandle, { content: () => string }>(
     const send = () => {
       if (!input.trim()) return;
       post(input.trim());
-      setInput('');
+      setInput("");
     };
 
     return (
@@ -93,9 +90,9 @@ const ChatBotPanel = forwardRef<ChatBotHandle, { content: () => string }>(
             <div
               key={i}
               className={
-                m.role === 'user'
-                  ? 'self-end bg-blue-600 text-white rounded-lg px-3 py-2 max-w-xs'
-                  : 'self-start bg-gray-100 text-gray-900 rounded-lg px-3 py-2 max-w-xs'
+                m.role === "user"
+                  ? "self-end bg-blue-600 text-white rounded-lg px-3 py-2 max-w-xs"
+                  : "self-start bg-gray-100 text-gray-900 rounded-lg px-3 py-2 max-w-xs"
               }
             >
               {m.content}
@@ -109,7 +106,7 @@ const ChatBotPanel = forwardRef<ChatBotHandle, { content: () => string }>(
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && send()}
+            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
             className="flex-1 border rounded px-3 py-2"
             placeholder="Ask anything…"
           />
@@ -129,7 +126,7 @@ const ChatBotPanel = forwardRef<ChatBotHandle, { content: () => string }>(
     );
   }
 );
-ChatBotPanel.displayName = 'ChatBotPanel';
+ChatBotPanel.displayName = "ChatBotPanel";
 
 /* -------------------------------------------------------------------------
  * EditorPanel
@@ -142,44 +139,44 @@ interface EditorProps {
 function EditorPanel({ transcriptId, onMinutesChange }: EditorProps) {
   const { versions, loading, reload } = useMinutesVersions(transcriptId);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [content, setContent] = useState('');
+  const [content, setContent] = useState("");
 
-  /* 初回ロード完了後にデフォルト選択 */
+  /* デフォルト選択 */
   useEffect(() => {
     if (!loading && versions.length && selectedId === null) {
       setSelectedId(versions[0].id);
     }
   }, [loading, versions, selectedId]);
 
-  /* バージョンが切り替わったらエディタ内容更新 */
+  /* バージョン切替 */
   useEffect(() => {
     const v = versions.find((v) => v.id === selectedId);
     if (v) setContent(v.markdown);
   }, [selectedId, versions]);
 
-  /* エディタ変更を親へ通知 (ChatBotPanel 用) */
+  /* 親へ通知 */
   useEffect(() => {
     if (selectedId !== null) onMinutesChange(content, selectedId);
   }, [content, onMinutesChange, selectedId]);
 
-  /* Save as new version */
+  /* Save as new */
   const saveAsNew = async () => {
     await fetch(`/minutes/api/minutes_versions?transcript_id=${transcriptId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ markdown: content }),
     });
     await reload();
   };
 
-  /* AI edit via minutes_versions/{id}/ai_edit */
+  /* AI edit */
   const aiEdit = async () => {
     if (!selectedId) return;
-    const instruction = window.prompt('AI への編集指示を入力');
+    const instruction = window.prompt("AI への編集指示を入力");
     if (!instruction) return;
     await fetch(`/minutes/api/minutes_versions/${selectedId}/ai_edit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ instruction }),
     });
     await reload();
@@ -194,8 +191,11 @@ function EditorPanel({ transcriptId, onMinutesChange }: EditorProps) {
       {/* header */}
       <div className="border-b p-2 flex flex-wrap items-center gap-2 bg-white">
         <VersionSelector
-          versions={versions}
-          value={selectedId}
+          versions={versions.map((v) => ({
+            id: v.id,
+            label: `ver${v.version_no}`,
+          }))}
+          current={selectedId}
           onChange={setSelectedId}
         />
         <ExportButton versionId={selectedId ?? 0} />
@@ -217,7 +217,7 @@ function EditorPanel({ transcriptId, onMinutesChange }: EditorProps) {
       <MDEditor
         height="100%"
         value={content}
-        onChange={(v) => setContent(v ?? '')}
+        onChange={(v) => setContent(v ?? "")}
         preview="live"
         previewOptions={{ remarkPlugins: [remarkGfm] }}
       />
@@ -232,7 +232,7 @@ export default function Workspace() {
   const { tid } = useParams<{ tid: string }>();
   if (!tid) return <p className="p-4 text-red-500">no transcriptId</p>;
 
-  // グローバルに transcriptId / update ハンドラを expose → ChatBotPanel が参照
+  /* expose transcriptId for ChatBotPanel */
   (window as any).__CURRENT_TID__ = Number(tid);
 
   const handleMinutesChange = (md: string, vid: number) => {
@@ -244,9 +244,8 @@ export default function Workspace() {
       <ResizableTwoPane
         left={
           <ChatBotPanel
-            content={() => (window as any).__CURRENT_CONTENT__ || ''}
+            content={() => (window as any).__CURRENT_CONTENT__ || ""}
             ref={(ref) => {
-              // Markdown 更新時に ChatBotPanel に伝える
               (window as any).__ON_MARKDOWN_UPDATE__ = (
                 md: string,
                 vid: number

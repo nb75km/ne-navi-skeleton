@@ -64,7 +64,8 @@ export default function TranscriptDetail() {
 
   const selected = versions.find((v) => v.id === selectedVersionId) || null;
   const latestNo = versions[0]?.version_no ?? 0;
-
+console.log("versions:", versions);
+console.log("selectedVersionId:", selectedVersionId);
   return (
     <div className="p-4 space-y-4">
       {/* ヘッダ */}
@@ -81,11 +82,12 @@ export default function TranscriptDetail() {
         )}
         <TranscriptControls transcriptId={transcript.id} />
         <ExportControls transcriptId={transcript.id} />
+
         {versions.length > 0 && (
           <VersionSelector
             versions={versions.map((v) => ({
               id: v.id,
-              label: `v${v.version_no}`,
+              label: `ver${(v as any).version_no ?? (v as any).versionNo}`,
             }))}
             current={selectedVersionId}
             onChange={setSelectedVersionId}
@@ -138,3 +140,5 @@ export default function TranscriptDetail() {
     </div>
   );
 }
+
+
