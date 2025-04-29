@@ -5,6 +5,7 @@ import ChatList from "./pages/ChatList";
 import ChatDetail from "./pages/ChatDetail";
 import MinutesList from "./pages/MinutesList";
 // import TranscriptDetail from "./pages/TranscriptDetail";
+import TranscriptDiff from "./pages/TranscriptDiff";
 import Workspace from "./pages/Workspace";
 import "@uiw/react-md-editor/markdown-editor.css";
 import "@uiw/react-markdown-preview/markdown.css";
@@ -19,6 +20,7 @@ export default function App() {
         <Route path="/minutes" element={<MinutesList />} />
         {/* <Route path="/minutes/:id" element={<TranscriptDetail />} /> */}
         <Route path="/workspace/:tid" element={<Workspace />} />
+        <Route path="/minutes/:id/diff" element={<TranscriptDiff />} />
       </Routes>
     </Router>
   );

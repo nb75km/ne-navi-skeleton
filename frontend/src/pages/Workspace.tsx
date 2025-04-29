@@ -8,8 +8,8 @@ import React, {
   forwardRef,
   useImperativeHandle,
 } from "react";
-import { useParams } from "react-router-dom";
-import { Loader2, Send, Save, Wand2 } from "lucide-react";
+import { useParams, Link } from "react-router-dom";
+import { Loader2, Send, Save, Wand2, GitCompare } from "lucide-react";
 
 import { ResizableTwoPane } from "../components/ResizableTwoPane";
 import { ExportButton } from "../components/ExportButton";
@@ -103,12 +103,24 @@ const ChatBotPanel = forwardRef<ChatBotHandle, { content: () => string }>(
 
         {/* input */}
         <div className="border-t p-2 flex gap-2">
-          <input
+          <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
-            className="flex-1 border rounded px-3 py-2"
-            placeholder="Ask anything…"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && e.shiftKey) {
+                e.preventDefault();
+                send();
+              }
+            }}
+            onInput={(e) => {
+              const el = e.currentTarget;
+              el.style.height = "auto";          // ①リセット
+              el.style.height = `${el.scrollHeight}px`; // ②必要分だけ広げる
+            }}
+            rows={1}
+            className="flex-1 border rounded px-3 py-2 resize-none leading-6"
+            style={{ maxHeight: "160px", overflowY: "auto" }}  // 上限を付与
+            placeholder="Enter で改行 / Shift+Enter で送信"
           />
           <button
             onClick={send}
@@ -199,6 +211,12 @@ function EditorPanel({ transcriptId, onMinutesChange }: EditorProps) {
           onChange={setSelectedId}
         />
         <ExportButton versionId={selectedId ?? 0} />
+        <Link
+          to={`/minutes/${transcriptId}/diff`}
+          className="flex items-center gap-1 text-sm bg-gray-200 hover:bg-gray-300 rounded px-3 py-1"
+        >
+          <GitCompare size={16} /> Diff
+        </Link>
         <button
           onClick={aiEdit}
           className="flex items-center gap-1 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded px-2 py-1"

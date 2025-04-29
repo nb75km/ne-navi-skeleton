@@ -8,6 +8,7 @@ from .api.stt_router import router as stt_router
 from .api.jobs_router import router as jobs_router
 from .api.agent_router import router as agent_router
 from .api.minutes_chat_router import router as mc_router   # ★ 追加
+from .api.diff_router import router as diff_router   # ★ 追加
 
 app = FastAPI(title="NE Navi – Minutes Maker")
 
@@ -26,3 +27,4 @@ app.include_router(draft_router)
 app.include_router(mv_router)
 app.include_router(agent_router)
 app.include_router(mc_router)                     # ★ 追加
+app.include_router(diff_router)
