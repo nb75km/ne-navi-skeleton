@@ -1,43 +1,57 @@
-# 既存 import 群...
+"""
+OpenAI へのラッパー – AI に議事録を修正させる。
+返値は assistant 返信と更新後 Markdown (変更なければ現状を返す)。
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from typing import Any, Dict, Sequence, Union
+
 from openai import OpenAI
+from ..schemas.chat import ChatMessage  # Pydantic 型
 
 client = OpenAI()
 
 
+def _to_openai_msg(m: Union[ChatMessage, Dict[str, Any]]) -> Dict[str, str]:
+    """ChatMessage / dict どちらでも OpenAI 形式へ揃える。"""
+    if isinstance(m, dict):
+        return {"role": m.get("role", "user"), "content": m.get("content", "")}
+    return {"role": m.role, "content": m.content}
+
+
 def complete_with_minutes(
-    user_messages: list[dict],
+    user_messages: Sequence[Union[ChatMessage, Dict[str, Any]]],
     user_input: str,
     current_minutes: str,
 ) -> tuple[str, str]:
-    """
-    GPT-4o に
-        1) assistant 返信（自然文）
-        2) 更新後 Markdown
-    を JSON 文字列で返してもらう。
-    """
     system_prompt = (
-        "あなたは優秀なビジネスアシスタントです。ユーザーと対話しながら議事録(Markdown)を改善します。"
-        "回答は以下 JSON フォーマットで返してください。\n"
-        "{\n"
-        '  "assistant_message": "<ユーザーへの返信>",\n'
-        '  "markdown": "<更新後Markdown。変更不要なら空文字>"\n'
-        "}"
+        "あなたは優秀なビジネスアシスタントです。ユーザーと対話しながら議事録(Markdown)"
+        "を改善します。回答は必ず JSON で返してください：\n"
+        '{ "assistant_message": "...", "markdown": "..." }'
     )
-    messages = [
+
+    messages: list[dict[str, str]] = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": f"現在の議事録:\n```\n{current_minutes}\n```"},
+    ] + [_to_openai_msg(m) for m in user_messages] + [
+        {"role": "user", "content": user_input}
     ]
-    # これまでの会話履歴
-    for m in user_messages:
-        messages.append({"role": m["role"], "content": m["content"]})
-    # 今回の指示
-    messages.append({"role": "user", "content": user_input})
 
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=messages,
-        response_format={"type": "json_object"},
+        response_format={"type": "json_object"},  # JSON mode
         temperature=0.3,
     )
-    data = resp.choices[0].message.json()
-    return data["assistant_message"], data["markdown"] or current_minutes
+
+    # 返値は JSON 文字列なのでパースする
+    raw: str = resp.choices[0].message.content  # type: ignore[attr-defined]
+    # ```json ... ``` を除去するケースもある&#8203;:contentReference[oaicite:3]{index=3}
+    raw = re.sub(r"```json\n?|```", "", raw).strip()
+    data = json.loads(raw)
+
+    markdown = data.get("markdown") or current_minutes
+    return data["assistant_message"], markdown

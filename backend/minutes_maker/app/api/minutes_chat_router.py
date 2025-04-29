@@ -1,11 +1,15 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from ..db import SessionLocal, models as M
+from ..db import SessionLocal
+from ..db.models import MinutesVersion  # 正しい ORM を import&#8203;:contentReference[oaicite:4]{index=4}
 from ..schemas.chat import ChatRequest, ChatResponse
-from ..services.llm import complete_with_minutes  # ← GPT-4o ラッパ
+from ..services.llm import complete_with_minutes
 
 router = APIRouter(prefix="/api", tags=["minutes_chat"])
+
 
 def get_db() -> Session:  # pragma: no cover
     db = SessionLocal()
@@ -14,26 +18,21 @@ def get_db() -> Session:  # pragma: no cover
     finally:
         db.close()
 
-@router.post("minutes_chat/{transcript_id}", response_model=ChatResponse)
+
+@router.post("/minutes_chat/{transcript_id}", response_model=ChatResponse)  # ← 先頭スラッシュ必須&#8203;:contentReference[oaicite:5]{index=5}
 def chat_edit_minutes(
     transcript_id: int,
     payload: ChatRequest,
     db: Session = Depends(get_db),
 ):
-    """
-    ユーザー指示を受け取り、AI に議事録を編集してもらう。
-    - 現在の最新版 MinutesVersion を取得
-    - LLM に指示を送り、assistant の返答と (必要に応じ) 更新後 Markdown を得る
-    - Markdown が変わった場合は新しい MinutesVersion を追加
-    """
     latest: MinutesVersion | None = (
         db.query(MinutesVersion)
         .filter(MinutesVersion.transcript_id == transcript_id)
-        .order_by(MinutesVersion.revision.desc())
+        .order_by(MinutesVersion.version_no.desc())
         .first()
     )
     if latest is None:
-        raise HTTPException(status_code=404, detail="Minutes not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Minutes not found")
 
     assistant_msg, updated_md = complete_with_minutes(
         user_messages=payload.messages,
@@ -45,6 +44,7 @@ def chat_edit_minutes(
     if updated_md.strip() != latest.markdown.strip():
         target = MinutesVersion(
             transcript_id=transcript_id,
+            version_no=latest.version_no + 1,
             markdown=updated_md,
             created_by=payload.user_id or "ui_user",
         )

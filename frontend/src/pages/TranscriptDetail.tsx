@@ -1,80 +1,100 @@
 import React, { useEffect, useState } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { Card } from "../components/ui/card";
 import { Loader2 } from "lucide-react";
 import { json } from "../lib/api";
+
 import DraftControls from "../components/DraftControls";
-import MinutesEditor from "../components/MinutesEditor";
 import GenerateDraftButton from "../components/GenerateDraftButton";
+import MinutesEditor from "../components/MinutesEditor";
 import TranscriptControls from "../components/TranscriptControls";
 import ExportControls from "../components/ExportControls";
-
+import VersionSelector from "../components/VersionSelector";
 
 interface Transcript {
   id: number;
   filename: string;
   language: string | null;
   created_at: string;
-  content: string;
+}
+
+interface Version {
+  id: number;
+  transcript_id: number;
+  version_no: number;
+  markdown: string;
+  created_at: string;
 }
 
 export default function TranscriptDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [data, setData] = useState<Transcript | null>(null);
-  const [latestMd, setLatestMd] = useState<string | null>(null);
-  const [hasDraft, setHasDraft] = useState<boolean | null>(null); // null = loading
-  const [editing, setEditing] = useState(false);
 
-  /* fetch transcript + versions */
+  const [transcript, setTranscript] = useState<Transcript | null>(null);
+  const [versions, setVersions] = useState<Version[]>([]);
+  const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  /* 初期ロード */
   useEffect(() => {
     if (!id) return;
-    const load = async () => {
-      const d = await json<Transcript>(`/minutes/api/transcripts/${id}`);
-      setData(d);
-      const versions = await json<any[]>(
-        `/minutes/api/minutes_versions?transcript_id=${d.id}`
+    (async () => {
+      setLoading(true);
+      const t = await json<Transcript>(`/minutes/api/transcripts/${id}`);
+      const vs = await json<Version[]>(
+        `/minutes/api/minutes_versions?transcript_id=${t.id}`
       );
-      if (versions.length) {
-        setHasDraft(true);
-        setLatestMd(versions[0].markdown);
-      } else {
-        setHasDraft(false);
-      }
-    };
-    load();
+      setTranscript(t);
+      setVersions(vs); // version_no DESC で返ってくる
+      setSelectedVersionId(vs.length ? vs[0].id : null);
+      setLoading(false);
+    })();
   }, [id]);
 
-  if (!data || hasDraft === null) return <Loader2 className="animate-spin m-4" />;
-
-  /* Draft 生成後に即 Workspace に行きたい場合 */
-  if (hasDraft && !latestMd) {
-    navigate(`/workspace/${data.id}`);
+  /* Draft が生成された直後は Workspace に自動遷移 */
+  if (!loading && versions.length === 0) {
+    navigate(`/workspace/${id}`);
     return null;
   }
 
+  if (loading || !transcript) {
+    return <Loader2 className="animate-spin m-4" />;
+  }
+
+  const selected = versions.find((v) => v.id === selectedVersionId) || null;
+  const latestNo = versions[0]?.version_no ?? 0;
+
   return (
     <div className="p-4 space-y-4">
-      {/* header */}
-      <div className="flex items-center gap-2">
+      {/* ヘッダ */}
+      <div className="flex flex-wrap items-center gap-2">
         <Link to="/minutes" className="text-blue-600 hover:underline">
           ← Back
         </Link>
-        <h1 className="text-xl font-bold truncate">{data.filename}</h1>
+        <h1 className="text-xl font-bold truncate">{transcript.filename}</h1>
 
-        {hasDraft ? (
-          /* 既にドラフトがあればモデル選択＋再生成 UI */
-          <DraftControls transcriptId={data.id} />
+        {versions.length ? (
+          <DraftControls transcriptId={transcript.id} />
         ) : (
-          /* ドラフトが無い場合だけ表示 */
-          <GenerateDraftButton transcriptId={data.id} />
+          <GenerateDraftButton transcriptId={transcript.id} />
         )}
-        <TranscriptControls transcriptId={data.id} />
-        <ExportControls transcriptId={data.id} />
+        <TranscriptControls transcriptId={transcript.id} />
+        <ExportControls transcriptId={transcript.id} />
+        {versions.length > 0 && (
+          <VersionSelector
+            versions={versions.map((v) => ({
+              id: v.id,
+              label: `v${v.version_no}`,
+            }))}
+            current={selectedVersionId}
+            onChange={setSelectedVersionId}
+          />
+        )}
       </div>
 
-      {/* Draft が存在する場合のみ表示 & 編集 */}
-      {hasDraft && (
+      {/* 本文 */}
+      {versions.length > 0 && selected && (
         <>
           {!editing && (
             <div className="flex justify-end">
@@ -82,37 +102,34 @@ export default function TranscriptDetail() {
                 onClick={() => setEditing(true)}
                 className="text-sm text-blue-600 hover:underline"
               >
-                Edit Latest
+                Edit (→ 新規 v{latestNo + 1})
               </button>
             </div>
           )}
 
           <Card className="p-4 space-y-2">
             <p className="text-sm text-gray-600">
-              {new Date(data.created_at).toLocaleString()}{" "}
-              {data.language && `| ${data.language}`}
+              version v{selected.version_no} |{" "}
+              {new Date(selected.created_at).toLocaleString()}
             </p>
             <pre className="whitespace-pre-wrap leading-relaxed">
-              {latestMd ?? "(generating…)"}
+              {selected.markdown}
             </pre>
           </Card>
 
-          {editing && latestMd && (
+          {editing && (
             <MinutesEditor
-              transcriptId={data.id}
-              currentMarkdown={latestMd}
-              onSaved={() => {
-                setEditing(false);
-                window.location.reload();
-              }}
+              transcriptId={transcript.id}
+              currentMarkdown={selected.markdown}
+              onSaved={() => window.location.reload()}
               onCancel={() => setEditing(false)}
             />
           )}
         </>
       )}
 
-      {/* ドラフトが無い場合のガイド表示 */}
-      {!hasDraft && (
+      {/* まだ Draft が無い場合のガイド */}
+      {versions.length === 0 && (
         <Card className="p-4 text-gray-600">
           このトランスクリプトにはまだ議事録ドラフトがありません。<br />
           右上の<strong>「Draft を生成」</strong>ボタンで GPT に要約を作成させましょう。
