@@ -13,6 +13,7 @@ import { Loader2, Send, Save, Sparkles, ListTodo } from 'lucide-react';
 import { json } from '../lib/api';
 import { ResizableTwoPane } from '../components/ResizableTwoPane';
 import { ExportButton } from '../components/ExportButton';
+import TranscriptToggle from '../components/TranscriptToggle';
 
 import MDEditor from '@uiw/react-md-editor';
 import '@uiw/react-md-editor/markdown-editor.css';
@@ -233,6 +234,7 @@ export default function Workspace() {
           />
         }
       />
+      <TranscriptToggle transcriptId={parseInt(tid, 10)} />
     </div>
   );
 }

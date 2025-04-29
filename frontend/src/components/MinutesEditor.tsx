@@ -1,6 +1,7 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { Loader2, Save, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import TranscriptToggle from "./TranscriptToggle";
 
 interface Props {
   transcriptId: number;
@@ -80,6 +81,7 @@ export default function MinutesEditor({
           </button>
         </div>
       </div>
+      <TranscriptToggle transcriptId={transcriptId} />
     </div>
   );
 }
