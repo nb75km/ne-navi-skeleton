@@ -3,6 +3,7 @@ WORKDIR /app
 
 # WeasyPrint 周りのライブラリに加え、日本語フォントをインストール
 RUN apt-get update && apt-get install -y \
+    ffmpeg \
     python3-pip \
     libglib2.0-0 \
     libpango-1.0-0 \

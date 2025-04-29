@@ -22,6 +22,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy import Computed
+from sqlalchemy.dialects import postgresql
+
 
 
 class Base(DeclarativeBase):
@@ -62,6 +64,9 @@ class Transcript(Base):
     file_id: Mapped[str] = mapped_column(String, ForeignKey("minutes.files.file_id", ondelete="CASCADE"), nullable=False)
     language: Mapped[Optional[str]] = mapped_column(String(8))
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    verbose_json: Mapped[Optional[str]] = mapped_column(
+        postgresql.JSON, nullable=True
+    )
     ts: Mapped[Optional[str]] = mapped_column(
         TSVECTOR,
         Computed("to_tsvector('japanese', content)", persisted=True),

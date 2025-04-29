@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..db import models as M
 from .. import SessionLocal
-from shared.stt_transcribe import transcribe_file   # Celery task
+from shared.stt_transcribe import transcribe_audio   # Celery task
 
 router = APIRouter(prefix="/api", tags=["files"])
 
@@ -45,6 +45,6 @@ async def upload_file(file: UploadFile = File(...)):
         sess.close()
 
     # --- STT タスク投入 ------------------------------------------------------
-    task = transcribe_file.delay(file_id)
+    task = transcribe_audio.delay(file_id)
 
     return {"file_id": file_id, "task_id": task.id}

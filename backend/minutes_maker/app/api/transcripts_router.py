@@ -6,6 +6,7 @@ from weasyprint import HTML
 from docx import Document
 from io import BytesIO
 import markdown as md
+import json
 
 from ..db import SessionLocal, models as M
 from ..service import export_file
@@ -53,7 +54,7 @@ def get_transcript(tid: int, db: Session = Depends(get_db)):
     if not t:
         raise HTTPException(status_code=404, detail="Not found")
     tr, fname = t
-    return {
+    base = {
         "id": tr.id,
         "file_id": tr.file_id,
         "filename": fname,
@@ -61,6 +62,10 @@ def get_transcript(tid: int, db: Session = Depends(get_db)):
         "created_at": tr.created_at,
         "content": tr.content,
     }
+    if tr.verbose_json:
+        base["segments"] = json.loads(tr.verbose_json)["segments"]
+    return base
+
 
 # --- 新規: EXPORT ---
 @router.get("/minutes/{version_id}/export")
@@ -115,3 +120,10 @@ def delete_transcript(tid: int, db: Session = Depends(get_db)):
     db.delete(tr)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+@router.get("/transcripts/{tid}/segments")
+def get_segments(tid: int, db: Session = Depends(get_db)):
+    segs = db.query(M.Transcript.verbose_json).filter(M.Transcript.id == tid).scalar()
+    if not segs:
+        raise HTTPException(404, "Not found")
+    return json.loads(segs)["segments"]
