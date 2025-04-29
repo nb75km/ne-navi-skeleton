@@ -14,6 +14,7 @@ import { Loader2, Send, Save, Wand2, GitCompare } from "lucide-react";
 import { ResizableTwoPane } from "../components/ResizableTwoPane";
 import { ExportButton } from "../components/ExportButton";
 import VersionSelector from "../components/VersionSelector";
+import ViewTranscriptButton from "../components/ViewTranscriptButton";
 import { useMinutesVersions } from "../lib/useMinutesVersions";
 import { ChatMessage, postChat } from "../lib/api";
 
@@ -48,13 +49,10 @@ const ChatBotPanel = forwardRef<ChatBotHandle, { content: () => string }>(
       setLoading(true);
 
       try {
-        const res = await postChat(
-          (window as any).__CURRENT_TID__,
-          {
-            messages: next.filter((m) => m.role === "user"),
-            user_input: body,
-          }
-        );
+        const res = await postChat((window as any).__CURRENT_TID__, {
+          messages: next.filter((m) => m.role === "user"),
+          user_input: body,
+        });
 
         setMessages([
           ...next,
@@ -114,12 +112,12 @@ const ChatBotPanel = forwardRef<ChatBotHandle, { content: () => string }>(
             }}
             onInput={(e) => {
               const el = e.currentTarget;
-              el.style.height = "auto";          // ①リセット
+              el.style.height = "auto"; // ①リセット
               el.style.height = `${el.scrollHeight}px`; // ②必要分だけ広げる
             }}
             rows={1}
             className="flex-1 border rounded px-3 py-2 resize-none leading-6"
-            style={{ maxHeight: "160px", overflowY: "auto" }}  // 上限を付与
+            style={{ maxHeight: "160px", overflowY: "auto" }} // 上限を付与
             placeholder="Enter で改行 / Shift+Enter で送信"
           />
           <button
@@ -210,6 +208,9 @@ function EditorPanel({ transcriptId, onMinutesChange }: EditorProps) {
           current={selectedId}
           onChange={setSelectedId}
         />
+        {/* ---------- 新規追加: スクリプト表示ボタン ---------- */}
+        <ViewTranscriptButton transcriptId={String(transcriptId)} />
+        {/* --------------------------------------------------- */}
         <ExportButton versionId={selectedId ?? 0} />
         <Link
           to={`/minutes/${transcriptId}/diff`}
