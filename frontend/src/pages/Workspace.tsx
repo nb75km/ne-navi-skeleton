@@ -1,3 +1,6 @@
+// ---------------------------------------------------------------------------
+// frontend/src/pages/Workspace.tsx  – バージョン切替 & AI 編集 対応版
+// ---------------------------------------------------------------------------
 import React, {
   useEffect,
   useRef,
@@ -7,91 +10,83 @@ import React, {
   RefObject,
 } from 'react';
 import { useParams } from 'react-router-dom';
-import { Loader2, Send, Save, Sparkles, ListTodo } from 'lucide-react';
+import {
+  Loader2,
+  Send,
+  Save,
+  Sparkles,
+  ListTodo,
+  Wand2,
+} from 'lucide-react';
 import { json } from '../lib/api';
 import { ResizableTwoPane } from '../components/ResizableTwoPane';
 import { ExportButton } from '../components/ExportButton';
-import TranscriptToggle from '../components/TranscriptToggle';
+import VersionSelector from '../components/VersionSelector';
+import {
+  useMinutesVersions,
+  MinutesVersion,
+} from '../lib/useMinutesVersions';
 
 import MDEditor from '@uiw/react-md-editor';
 import '@uiw/react-md-editor/markdown-editor.css';
 import '@uiw/react-markdown-preview/markdown.css';
 import remarkGfm from 'remark-gfm';
 
+/* -------------------------------------------------------------------------
+ * ChatBotPanel – 既存実装を保持
+ * ----------------------------------------------------------------------*/
 export interface ChatBotHandle {
-  sendPrompt: (
-    instruction: string
-  ) => Promise<{ chatResponse: string; editedMinutes: string; versionNo: number }>;
-  appendMessage: (role: 'assistant' | 'user', body: string) => void;
+  sendPrompt: (body: string) => Promise<void>;
 }
 
-interface ChatBotPanelProps {
-  content: string;
-}
-
-const ChatBotPanel = forwardRef<ChatBotHandle, ChatBotPanelProps>(
+const ChatBotPanel = forwardRef<ChatBotHandle, { content: () => string }>(
   ({ content }, ref) => {
-    const [messages, setMessages] = useState<{ role: string; body: string }[]>([]);
+    const [messages, setMessages] = useState<{ role: string; body: string }[]>(
+      []
+    );
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
     const endRef = useRef<HTMLDivElement>(null);
 
-    // 会話履歴を localStorage から復元
     useEffect(() => {
-      const saved = localStorage.getItem('minutesMessages');
-      if (saved) setMessages(JSON.parse(saved));
-    }, []);
-
-    // ローカル保存 & スクロール
-    useEffect(() => {
-      localStorage.setItem('minutesMessages', JSON.stringify(messages));
       endRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
-    const post = async (
-      instruction: string
-    ): Promise<{ chatResponse: string; editedMinutes: string; versionNo: number }> => {
-      setMessages((m) => [...m, { role: 'user', body: instruction }]);
+    const post = async (body: string) => {
+      setMessages((m) => [...m, { role: 'user', body }]);
       setLoading(true);
 
-      // 全文＋命令を組み合わせ
-      const fullBody = [
-        '以下は現在の議事録全文です。',
+      // Minutes全文をプロンプトに含めて送信
+      const full = [
         'CONTENT_START',
-        content,
+        content(),
         'CONTENT_END',
-        '指示:',
-        instruction,
+        'INSTRUCTION:',
+        body,
       ].join('\n');
 
       try {
         const res = await fetch('/minutes/api/agent', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ body: fullBody }),
+          body: JSON.stringify({ body: full }),
         });
         const data = await res.json();
-        const { chatResponse, editedMinutes, versionNo } = data;
-        setMessages((m) => [...m, { role: 'assistant', body: chatResponse }]);
-        return { chatResponse, editedMinutes, versionNo };
+        setMessages((m) => [
+          ...m,
+          { role: 'assistant', body: data.body ?? data.chatResponse ?? '(no resp)' },
+        ]);
       } catch (e: any) {
-        const err = 'Error: ' + (e.message || e);
-        setMessages((m) => [...m, { role: 'assistant', body: err }]);
-        return { chatResponse: err, editedMinutes: '', versionNo: -1 };
+        setMessages((m) => [
+          ...m,
+          { role: 'assistant', body: 'Error: ' + (e.message || e) },
+        ]);
       } finally {
         setLoading(false);
       }
     };
 
-    const appendMessage = (role: 'assistant' | 'user', body: string) => {
-      setMessages((m) => [...m, { role, body }]);
-    };
-
-    useImperativeHandle(
-      ref,
-      () => ({ sendPrompt: post, appendMessage }),
-      []
-    );
+    useImperativeHandle(ref, () => ({ sendPrompt: post }), []);
 
     const send = () => {
       if (!input.trim()) return;
@@ -129,7 +124,11 @@ const ChatBotPanel = forwardRef<ChatBotHandle, ChatBotPanelProps>(
             disabled={loading}
             className="bg-blue-600 hover:bg-blue-700 text-white px-3 rounded disabled:opacity-60"
           >
-            {loading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
+            {loading ? (
+              <Loader2 className="animate-spin" size={16} />
+            ) : (
+              <Send size={16} />
+            )}
           </button>
         </div>
       </div>
@@ -138,38 +137,38 @@ const ChatBotPanel = forwardRef<ChatBotHandle, ChatBotPanelProps>(
 );
 ChatBotPanel.displayName = 'ChatBotPanel';
 
+/* -------------------------------------------------------------------------
+ * EditorPanel – ここにバージョン切替 & AI 編集を追加
+ * ----------------------------------------------------------------------*/
 interface EditorProps {
   transcriptId: number;
-  content: string | null;
-  setContent: (c: string) => void;
   chatBotRef: RefObject<ChatBotHandle>;
 }
 
-function EditorPanel({
-  transcriptId,
-  content,
-  setContent,
-  chatBotRef,
-}: EditorProps) {
+function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
+  const { versions, loading: versionsLoading, reload } =
+    useMinutesVersions(transcriptId);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [content, setContent] = useState<string>('');
   const [saving, setSaving] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [versionNo, setVersionNo] = useState<number | null>(null);
+
+  /* 初期ロード & バージョン変更 */
+  useEffect(() => {
+    if (!versionsLoading && versions.length && selectedId === null) {
+      setSelectedId(versions[0].id);
+    }
+  }, [versionsLoading, versions, selectedId]);
 
   useEffect(() => {
-    json<any[]>(`/minutes/api/minutes_versions?transcript_id=${transcriptId}`).then(
-      (v) => {
-        if (v.length) {
-          setVersionNo(v[0].version_no);
-          setContent(v[0].markdown);
-        } else {
-          setVersionNo(null);
-          setContent('# (no draft)');
-        }
-      }
-    );
-  }, [transcriptId, setContent]);
+    if (selectedId !== null) {
+      const v = versions.find((v) => v.id === selectedId);
+      if (v) setContent(v.markdown);
+    }
+  }, [selectedId, versions]);
 
-  const save = async () => {
+  /* 保存 (新規バージョン) */
+  const saveAsNew = async () => {
+    if (!content.trim()) return;
     setSaving(true);
     await fetch(`/minutes/api/minutes_versions?transcript_id=${transcriptId}`, {
       method: 'POST',
@@ -177,70 +176,66 @@ function EditorPanel({
       body: JSON.stringify({ markdown: content }),
     });
     setSaving(false);
-    alert('Saved!');
+    reload();
   };
 
-  const askAI = async (mode: 'simplify' | 'todo') => {
-    if (!content) return;
-    const instruction =
-      mode === 'simplify'
-        ? '以下の議事録をより簡潔に要約してください。'
-        : '以下の議事録からTODOを抽出してください。';
-
-    setAiLoading(true);
-    try {
-      const { chatResponse, editedMinutes, versionNo: newVer } =
-        await chatBotRef.current!.sendPrompt(instruction);
-      chatBotRef.current!.appendMessage('assistant', chatResponse);
-      setContent(editedMinutes);
-      if (newVer > 0) setVersionNo(newVer);
-    } finally {
-      setAiLoading(false);
+  /* AI 編集 → backend /ai_edit */
+  const aiEdit = async () => {
+    if (selectedId === null) return alert('バージョンが選択されていません');
+    const instruction = window.prompt('AI への編集指示を入力してください');
+    if (!instruction) return;
+    setSaving(true);
+    const rsp = await fetch(`/minutes/api/minutes_versions/${selectedId}/ai_edit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instruction }),
+    });
+    setSaving(false);
+    if (!rsp.ok) {
+      return alert('AI 編集に失敗しました:\n' + (await rsp.text()));
     }
+    reload();
   };
 
-  if (content === null) {
+  if (versionsLoading && versions.length === 0) {
     return <Loader2 className="m-auto animate-spin" />;
   }
 
   return (
     <div className="flex flex-col h-full bg-gray-50">
-      <div className="border-b p-2 flex justify-between items-center bg-white sticky top-0 z-10">
-        <h2 className="font-semibold text-gray-800">Minutes Editor</h2>
-        <div className="flex gap-1">
-          <div className="flex items-center space-x-4">
-            <span className="text-xl font-bold">
-              {versionNo !== null ? `Version ${versionNo}` : 'No Draft'}
-            </span>
-            <ExportButton versionId={versionNo ?? 0} />
-          </div>
-          <div className="flex gap-1">
-            <button
-              onClick={() => askAI('simplify')}
-              disabled={saving || aiLoading}
-              className="flex items-center gap-1 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded px-2 py-1 disabled:opacity-60"
-            >
-              <Sparkles size={14} /> 簡潔に
-            </button>
-            <button
-              onClick={() => askAI('todo')}
-              disabled={saving || aiLoading}
-              className="flex items-center gap-1 text-sm bg-amber-600 hover:bg-amber-700 text-white rounded px-2 py-1 disabled:opacity-60"
-            >
-              <ListTodo size={14} /> TODO抽出
-            </button>
-            <button
-              onClick={save}
-              disabled={saving || aiLoading}
-              className="text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded px-3 py-1 disabled:opacity-60"
-            >
-              {saving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
-            </button>
-          </div>
-        </div>
+      {/* header */}
+      <div className="border-b p-2 flex flex-wrap items-center gap-2 bg-white sticky top-0 z-10">
+        <VersionSelector
+          versions={versions}
+          value={selectedId}
+          onChange={(id) => setSelectedId(id)}
+        />
+        <ExportButton versionId={selectedId ?? 0} />
+        <button
+          onClick={aiEdit}
+          className="flex items-center gap-1 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded px-2 py-1"
+        >
+          <Wand2 size={14} /> AI Edit
+        </button>
+        <button
+          onClick={saveAsNew}
+          disabled={saving}
+          className="text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded px-3 py-1 disabled:opacity-60"
+        >
+          {saving ? (
+            <Loader2 className="animate-spin" size={16} />
+          ) : (
+            <Save size={16} />
+          )}
+          Save as New
+        </button>
       </div>
+
+      {/* editor */}
       <div className="relative flex-1 overflow-hidden h-full">
         <MDEditor
+          height="100%"
+          className="h-full w-md-editor"
           value={content}
           onChange={(v) => setContent(v ?? '')}
           preview="live"
@@ -250,43 +245,41 @@ function EditorPanel({
             style: { height: '100%' },
           }}
           textareaProps={{
-            readOnly: aiLoading,
             className: 'text-gray-900 bg-white h-full w-md-editor-text',
             style: { height: '100%' },
           }}
         />
-        {aiLoading && (
-          <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10">
-            <Loader2 className="animate-spin" size={24} />
-            <span className="ml-2 text-lg text-gray-700">AI応答待ち…</span>
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
+/* -------------------------------------------------------------------------
+ * Workspace – Two‑pane レイアウト
+ * ----------------------------------------------------------------------*/
 export default function Workspace() {
   const { tid } = useParams<{ tid: string }>();
-  const [content, setContent] = useState<string | null>(null);
+  const minutesRef = useRef<string>('');
   const chatBotRef = useRef<ChatBotHandle>(null);
+
+  // Memoize current minutes for ChatBotPanel prompt
+  const setMinutes = (m: string) => {
+    minutesRef.current = m;
+  };
 
   if (!tid) return <p className="p-4 text-red-500">no transcriptId</p>;
 
   return (
     <div className="h-screen flex">
       <ResizableTwoPane
-        left={<ChatBotPanel content={content ?? ''} ref={chatBotRef} />}
+        left={<ChatBotPanel ref={chatBotRef} content={() => minutesRef.current} />}
         right={
           <EditorPanel
             transcriptId={parseInt(tid, 10)}
-            content={content}
-            setContent={setContent}
             chatBotRef={chatBotRef}
           />
         }
       />
-      <TranscriptToggle transcriptId={parseInt(tid, 10)} />
     </div>
   );
 }
