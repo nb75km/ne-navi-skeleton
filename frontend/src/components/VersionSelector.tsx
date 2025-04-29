@@ -1,32 +1,23 @@
-// ---------------------------------------------------------------------------
-// frontend/src/components/VersionSelector.tsx
-// ---------------------------------------------------------------------------
-import React from 'react';
-import { MinutesVersion } from '../lib/useMinutesVersions';
+import React from "react";
 
 interface Props {
-  versions: MinutesVersion[];
-  value: number | null;
+  versions: { id: number; label: string }[];
+  current: number | null;
   onChange: (id: number) => void;
 }
 
-/**
- * ドロップダウン 1 つだけでシンプルにバージョンを切り替える UI
- */
-const VersionSelector: React.FC<Props> = ({ versions, value, onChange }) => {
-  return (
-    <select
-      value={value ?? ''}
-      onChange={(e) => onChange(Number(e.target.value))}
-      className="border rounded px-2 py-1 text-sm"
-    >
-      {versions.map((v) => (
-        <option key={v.id} value={v.id}>
-          {`v${v.id}  –  ${new Date(v.created_at).toLocaleString()}`}
-        </option>
-      ))}
-    </select>
-  );
-};
+const VersionSelector: React.FC<Props> = ({ versions, current, onChange }) => (
+  <select
+    className="border px-2 py-1 rounded text-sm"
+    value={current ?? ""}
+    onChange={(e) => onChange(Number(e.target.value))}
+  >
+    {versions.map((v) => (
+      <option key={v.id} value={v.id}>
+        {v.label}
+      </option>
+    ))}
+  </select>
+);
 
 export default VersionSelector;

@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// frontend/src/pages/Workspace.tsx  – バージョン切替 & AI 編集 対応版
+// frontend/src/pages/Workspace.tsx  – バージョン切替 & AI チャット編集 対応版
 // ---------------------------------------------------------------------------
 import React, {
   useEffect,
@@ -8,17 +8,16 @@ import React, {
   forwardRef,
   useImperativeHandle,
   RefObject,
+  useCallback,
 } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   Loader2,
   Send,
   Save,
-  Sparkles,
-  ListTodo,
   Wand2,
 } from 'lucide-react';
-import { json } from '../lib/api';
+
 import { ResizableTwoPane } from '../components/ResizableTwoPane';
 import { ExportButton } from '../components/ExportButton';
 import VersionSelector from '../components/VersionSelector';
@@ -33,7 +32,7 @@ import '@uiw/react-markdown-preview/markdown.css';
 import remarkGfm from 'remark-gfm';
 
 /* -------------------------------------------------------------------------
- * ChatBotPanel – 既存実装を保持
+ * ChatBotPanel
  * ----------------------------------------------------------------------*/
 export interface ChatBotHandle {
   sendPrompt: (body: string) => Promise<void>;
@@ -56,8 +55,8 @@ const ChatBotPanel = forwardRef<ChatBotHandle, { content: () => string }>(
       setMessages((m) => [...m, { role: 'user', body }]);
       setLoading(true);
 
-      // Minutes全文をプロンプトに含めて送信
-      const full = [
+      // Minutes 全文をプロンプトに含める
+      const fullPrompt = [
         'CONTENT_START',
         content(),
         'CONTENT_END',
@@ -69,12 +68,15 @@ const ChatBotPanel = forwardRef<ChatBotHandle, { content: () => string }>(
         const res = await fetch('/minutes/api/agent', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ body: full }),
+          body: JSON.stringify({ body: fullPrompt }),
         });
         const data = await res.json();
         setMessages((m) => [
           ...m,
-          { role: 'assistant', body: data.body ?? data.chatResponse ?? '(no resp)' },
+          {
+            role: 'assistant',
+            body: data.body ?? data.chatResponse ?? '(no response)',
+          },
         ]);
       } catch (e: any) {
         setMessages((m) => [
@@ -96,6 +98,7 @@ const ChatBotPanel = forwardRef<ChatBotHandle, { content: () => string }>(
 
     return (
       <div className="flex flex-col h-full bg-white">
+        {/* メッセージ一覧 */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {messages.map((m, i) => (
             <div
@@ -111,6 +114,8 @@ const ChatBotPanel = forwardRef<ChatBotHandle, { content: () => string }>(
           ))}
           <div ref={endRef} />
         </div>
+
+        {/* 入力フォーム */}
         <div className="border-t p-2 flex gap-2">
           <input
             value={input}
@@ -138,14 +143,15 @@ const ChatBotPanel = forwardRef<ChatBotHandle, { content: () => string }>(
 ChatBotPanel.displayName = 'ChatBotPanel';
 
 /* -------------------------------------------------------------------------
- * EditorPanel – ここにバージョン切替 & AI 編集を追加
+ * EditorPanel
  * ----------------------------------------------------------------------*/
 interface EditorProps {
   transcriptId: number;
   chatBotRef: RefObject<ChatBotHandle>;
+  onMinutesChange: (markdown: string) => void;
 }
 
-function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
+function EditorPanel({ transcriptId, onMinutesChange }: EditorProps) {
   const { versions, loading: versionsLoading, reload } =
     useMinutesVersions(transcriptId);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -166,6 +172,11 @@ function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
     }
   }, [selectedId, versions]);
 
+  // 編集内容が変わったら親へ通知（ChatBotPanel 用）
+  useEffect(() => {
+    onMinutesChange(content);
+  }, [content, onMinutesChange]);
+
   /* 保存 (新規バージョン) */
   const saveAsNew = async () => {
     if (!content.trim()) return;
@@ -176,25 +187,28 @@ function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
       body: JSON.stringify({ markdown: content }),
     });
     setSaving(false);
-    reload();
+    await reload();
   };
 
-  /* AI 編集 → backend /ai_edit */
+  /* AI 編集 */
   const aiEdit = async () => {
     if (selectedId === null) return alert('バージョンが選択されていません');
     const instruction = window.prompt('AI への編集指示を入力してください');
     if (!instruction) return;
     setSaving(true);
-    const rsp = await fetch(`/minutes/api/minutes_versions/${selectedId}/ai_edit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ instruction }),
-    });
+    const rsp = await fetch(
+      `/minutes/api/minutes_versions/${selectedId}/ai_edit`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instruction }),
+      }
+    );
     setSaving(false);
     if (!rsp.ok) {
       return alert('AI 編集に失敗しました:\n' + (await rsp.text()));
     }
-    reload();
+    await reload();
   };
 
   if (versionsLoading && versions.length === 0) {
@@ -203,7 +217,7 @@ function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
 
   return (
     <div className="flex flex-col h-full bg-gray-50">
-      {/* header */}
+      {/* Header */}
       <div className="border-b p-2 flex flex-wrap items-center gap-2 bg-white sticky top-0 z-10">
         <VersionSelector
           versions={versions}
@@ -220,7 +234,7 @@ function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
         <button
           onClick={saveAsNew}
           disabled={saving}
-          className="text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded px-3 py-1 disabled:opacity-60"
+          className="flex items-center gap-1 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded px-3 py-1 disabled:opacity-60"
         >
           {saving ? (
             <Loader2 className="animate-spin" size={16} />
@@ -231,7 +245,7 @@ function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
         </button>
       </div>
 
-      {/* editor */}
+      {/* Editor */}
       <div className="relative flex-1 overflow-hidden h-full">
         <MDEditor
           height="100%"
@@ -255,28 +269,36 @@ function EditorPanel({ transcriptId, chatBotRef }: EditorProps) {
 }
 
 /* -------------------------------------------------------------------------
- * Workspace – Two‑pane レイアウト
+ * Workspace – two-pane レイアウト
  * ----------------------------------------------------------------------*/
 export default function Workspace() {
   const { tid } = useParams<{ tid: string }>();
-  const minutesRef = useRef<string>('');
   const chatBotRef = useRef<ChatBotHandle>(null);
+  const minutesRef = useRef<string>('');
 
-  // Memoize current minutes for ChatBotPanel prompt
-  const setMinutes = (m: string) => {
-    minutesRef.current = m;
-  };
+  // ChatBotPanel へ最新 Markdown を渡す
+  const handleMinutesChange = useCallback((md: string) => {
+    minutesRef.current = md;
+  }, []);
 
-  if (!tid) return <p className="p-4 text-red-500">no transcriptId</p>;
+  if (!tid) {
+    return <p className="p-4 text-red-500">no transcriptId</p>;
+  }
 
   return (
     <div className="h-screen flex">
       <ResizableTwoPane
-        left={<ChatBotPanel ref={chatBotRef} content={() => minutesRef.current} />}
+        left={
+          <ChatBotPanel
+            ref={chatBotRef}
+            content={() => minutesRef.current}
+          />
+        }
         right={
           <EditorPanel
             transcriptId={parseInt(tid, 10)}
             chatBotRef={chatBotRef}
+            onMinutesChange={handleMinutesChange}
           />
         }
       />
