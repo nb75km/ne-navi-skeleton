@@ -84,7 +84,10 @@ services:
     networks: [appnet]
     volumes:
       - uploads:/data/uploads        # ★追加
-
+    healthcheck: # 追加: 再起動ループ抑止
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      retries: 3
   # ---------------------------------------------------------------
   # 5. Celery ワーカ (shared)  ★名前を minutes_worker に変更しても OK
   # ---------------------------------------------------------------

@@ -30,6 +30,7 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 # --------------------------------------------------------------------------- #
 def _save_file_to_disk(f: UploadFile, dst: Path):
     """UploadFile から bytes を読み込んで dst へ保存"""
+    dst.parent.mkdir(parents=True, exist_ok=True)  # mkdir -p 相当
     dst.write_bytes(f.file.read())
 
 
@@ -62,9 +63,12 @@ async def upload_file(file: UploadFile = File(...)):
         sess.close()
 
     # ---------- 3. Celery task & jobs ----------------------------------------
-    # Celery へ投入すると task_id が返る → これをそのまま jobs.id に採用
-    task = transcribe_and_generate_minutes.delay(file_id, None)
-    job_id = task.id
+    job_id = str(uuid4())
+
+    task = transcribe_and_generate_minutes.apply_async(
+        args = (file_id, job_id),
+        task_id = job_id,  # ← task.id == job_id になる
+    )
 
     sess = SessionLocal()
     try:
@@ -80,8 +84,4 @@ async def upload_file(file: UploadFile = File(...)):
         sess.close()
 
     # ---------- 4. task 引数を確定させる --------------------------------------
-    # 第一段階で None を渡していた job_id を、確定した値に上書きする
-    # （Celery 5.4 の .replace() を利用）
-    task.replace(args=(file_id, job_id))
-
-    return {"file_id": file_id, "job_id": job_id}
+    return {"file_id": file_id, "task_id": job_id}

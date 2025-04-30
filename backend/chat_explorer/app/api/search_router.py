@@ -1,6 +1,6 @@
 from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 from ..db import SessionLocal
 from ..service import search as svc
@@ -21,8 +21,8 @@ class MessageOut(BaseModel):
     body: str
     created_at: str
 
-    class Config:
-        from_attributes = True
+    # Pydantic v2
+    model_config = ConfigDict(from_attributes=True)
 
 @router.get("/search", response_model=list[MessageOut])
 def search_messages(
