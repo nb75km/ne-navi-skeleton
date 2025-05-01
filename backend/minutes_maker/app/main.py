@@ -10,7 +10,7 @@ from .api.agent_router import router as agent_router
 from .api.minutes_chat_router import router as mc_router   # ★ 追加
 from .api.diff_router import router as diff_router   # ★ 追加
 from common.security import fastapi_users, auth_backend  # :contentReference[oaicite:6]{index=6}
-from common.schemas import UserRead, UserCreate  # :contentReference[oaicite:7]{index=7}
+from common.schemas import UserRead, UserCreate, UserUpdate  # :contentReference[oaicite:7]{index=7}
 
 app = FastAPI(title="NE Navi – Minutes Maker")
 
@@ -27,9 +27,9 @@ app.include_router(
     tags=["auth"],
 )
 app.include_router(
-    fastapi_users.get_users_router(UserRead, UserCreate),
-    prefix="/users",
-    tags=["auth"],
+    fastapi_users.get_users_router(UserRead, UserUpdate),  # ② Update 用 schema
+    prefix = "/users",
+    tags=["users"],
 )
 
 @app.get("/health")

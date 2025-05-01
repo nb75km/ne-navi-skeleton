@@ -99,3 +99,4 @@ export const deleteMinutes = (id: number) => api.delete<null>(`/minutes/${id}`);
 
 /* === 公開エンドポイント === */
 export const ping = () => api.get<string>("/ping");
+export const getMe = () => api.get<{ id: string; email: string }>("/auth/users/me");

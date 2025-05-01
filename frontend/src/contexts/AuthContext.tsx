@@ -48,7 +48,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   /** /users/me を叩いて現在のユーザーを取得（未ログインなら 401 → user=null） */
   const reload = async () => {
     try {
-      const me = await api.get<User>("/users/me"); // Cookie が自動送信される
+      const me = await api.get<User>("/users/me");  // Cookie が自動送信される
       setUser(me);
     } catch {
       setUser(null);
