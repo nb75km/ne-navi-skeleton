@@ -6,7 +6,6 @@ FastAPI インスタンスを **生成しない** ので、
 
 import os, uuid
 from typing import AsyncGenerator
-
 from fastapi import Depends
 from fastapi_users import FastAPIUsers, UUIDIDMixin, BaseUserManager
 from fastapi_users.authentication import (
@@ -27,7 +26,13 @@ SECRET = os.getenv("SECRET_KEY")
 if not SECRET:
     raise RuntimeError("SECRET_KEY env var is required for JWT auth")
 
-cookie_transport = CookieTransport(cookie_name="access", cookie_max_age=60 * 60)
+cookie_transport = CookieTransport(
+    cookie_name   = "access",
+    cookie_max_age= 60 * 60,
+    # Python 3.12 では distutils が無いので自前で文字列→bool 変換
+    cookie_secure = os.getenv("COOKIE_SECURE", "0").lower() in ("1", "true", "yes"),
+    cookie_samesite="lax",
+)
 
 def get_jwt_strategy() -> JWTStrategy:
     return JWTStrategy(secret=SECRET, lifetime_seconds=60 * 60)

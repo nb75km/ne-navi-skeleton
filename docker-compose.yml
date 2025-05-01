@@ -88,6 +88,9 @@ services:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 30s
       retries: 3
+    environment:
+      - SECRET_KEY=${SECRET_KEY}             # 必須
+      - COOKIE_SECURE=${COOKIE_SECURE:-0}    # 0=dev, 1=prod
   # ---------------------------------------------------------------
   # 5. Celery ワーカ (shared)  ★名前を minutes_worker に変更しても OK
   # ---------------------------------------------------------------
@@ -138,7 +141,7 @@ services:
     ports:
       - "8080:80"
     environment:
-      - VITE_BACKEND_BASE=
+      - VITE_BACKEND_BASE=http://localhost:8000
     depends_on: [chat, minutes]
     networks: [appnet]
 

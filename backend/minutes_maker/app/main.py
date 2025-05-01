@@ -11,8 +11,25 @@ from .api.minutes_chat_router import router as mc_router   # ★ 追加
 from .api.diff_router import router as diff_router   # ★ 追加
 from common.security import fastapi_users, auth_backend  # :contentReference[oaicite:6]{index=6}
 from common.schemas import UserRead, UserCreate, UserUpdate  # :contentReference[oaicite:7]{index=7}
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="NE Navi – Minutes Maker")
+
+origins = [
+    "http://localhost",
+    "http://localhost:5173",   # Vite 開発サーバー
+    "http://127.0.0.1",
+    "http://127.0.0.1:5173",
+    "http://frontend",         # docker-compose 上のサービス名
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,     # ここに許可したい Origin を並べる
+    allow_credentials=True,    # ← Cookie を送受信するため必須
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ---- Auth routers ---------------------------------------------------
