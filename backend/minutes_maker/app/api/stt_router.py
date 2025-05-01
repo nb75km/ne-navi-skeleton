@@ -31,6 +31,8 @@ from openai import OpenAI, OpenAIError
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from tenacity import retry, stop_after_attempt, wait_exponential_jitter
+from common.security import current_user
+from common.models.user import User
 
 from ..db import SessionLocal, models as M
 
@@ -99,6 +101,7 @@ async def create_transcript(
         description="ISO-639 言語コード。省略時は Whisper 自動判定",
     ),
     db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ):
     # --- basic type check ----------------------------------------------------
     ctype = (audio.content_type or "").lower()
@@ -129,6 +132,7 @@ async def create_transcript(
         file_id=file_id,
         filename=audio.filename,
         mime_type=audio.content_type,
+        user_id=user.id,
     )
     db.add(file_row)
 
@@ -136,6 +140,7 @@ async def create_transcript(
         file_id=file_id,
         language=lang,
         content=text,
+        user_id=user.id,
     )
     db.add(trans_row)
     db.commit()

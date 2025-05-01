@@ -4,13 +4,20 @@ from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
+from sqlalchemy import MetaData
 
 import os
 from chat_explorer.app.db.models import Base as ChatBase
 from minutes_maker.app.db.models import Base as MinutesBase
+from common.models.user import User
 from common.models.user import Base as UserBase
 
-target_metadata = [ChatBase.metadata, MinutesBase.metadata, UserBase.metadata]
+combined = MetaData()
+
+for m in (ChatBase.metadata, MinutesBase.metadata, UserBase.metadata):
+    for table in m.tables.values():
+        table.to_metadata(combined)   # 新 2.0 API
+target_metadata = combined
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
