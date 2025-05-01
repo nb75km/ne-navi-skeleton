@@ -1,164 +1,148 @@
+/* =========================================================
+ *  MinutesList.tsx  –  localStorage を一切使わずに描画
+ * ======================================================= */
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Loader2, UploadCloud, Trash2 } from "lucide-react";
 import { json } from "../lib/api";
 import { StatusLamp } from "../components/StatusLamp";
 
-/* -------------------- 型 -------------------- */
-export interface Transcript {
+/* ---------- 型 ---------- */
+type Phase = "stt" | "draft" | "ready" | "error";
+
+interface Transcript {
   id: number;
   file_id: string;
   filename: string;
   created_at: string;
 }
 
-type Phase = "stt" | "draft" | "ready" | "error";
-
 type ItemEx = Transcript & {
   phase: Phase;
-  sttJobId?: string;
-  draftJobId?: string;
+  sttJobId?: string; // Whisper ジョブ UUID
 };
 
-/* -------------------- LocalStorage Helpers -------------------- */
-const LS_KEY = "minutes_items";
-const loadLS = (): ItemEx[] => {
-  try {
-    return JSON.parse(localStorage.getItem(LS_KEY) || "[]");
-  } catch {
-    return [];
-  }
-};
-const saveLS = (items: ItemEx[]) =>
-  localStorage.setItem(LS_KEY, JSON.stringify(items));
-
-/* -------------------- ページ -------------------- */
+/* ---------- ページ ---------- */
 export default function MinutesList() {
-  const [items, setItems] = useState<ItemEx[]>(loadLS);
-  const [loading, setLoading] = useState(items.length === 0);
-
-  /* setInterval の id を保持してアンマウント時に停止 */
+  const [items, setItems]   = useState<ItemEx[]>([]);
+  const [loading, setLoad]  = useState(true);
   const timers = useRef<number[]>([]);
+
+  /* unmount 時にポーリング停止 */
   useEffect(() => () => timers.current.forEach(clearInterval), []);
 
-  /* ------ 状態が変わるたび localStorage へ反映 ------ */
-  useEffect(() => saveLS(items), [items]);
-
-  /* ---------- 初回ロード (Transcripts + Jobs) ---------- */
+  /* --------- 初回ロード (毎回サーバから取得) --------- */
   useEffect(() => {
-    (async () => {
-      // ❶ 既存 transcript を取得
-      const { items: list } = await json<{ items: Transcript[] }>(
-        "/minutes/api/transcripts?limit=100&order=desc"
-      );
-
-      // ❷ 進行中 Job を取得
-      const jobs = await json<
-        {
-          id: string;
-          transcript_id: number | null;
-          status: "PENDING" | "PROCESSING" | "DRAFT_READY" | "FAILED";
-          created_at: string;
-          task_id: string;
-        }[]
-      >("/minutes/api/jobs");
-
-      /* Transcript に紐づくジョブ進捗を phase に変換 */
-      const jobMap = new Map<string, ItemEx>();
-      jobs.forEach((j) => {
-        const phase: Phase =
-          j.status === "DRAFT_READY"
-            ? "ready"
-            : j.status === "FAILED"
-            ? "error"
-            : j.status === "PROCESSING"
-            ? "draft"
-            : "stt";
-        jobMap.set(j.task_id, {
-          id: j.transcript_id ?? -1,
-          file_id: j.id,
-          filename: "(processing)",
-          created_at: j.created_at,
-          phase,
-          sttJobId: j.task_id,
-        });
-      });
-
-      // list を ItemEx に変換
-      const merged = list.map<ItemEx>((t) => ({
-        ...t,
-        phase: "ready",
-      }));
-
-      /* jobs 側でまだ transcript が無いものをプレースホルダとして追加 */
-      for (const job of jobMap.values()) {
-        const exists = merged.find((m) => m.sttJobId === job.sttJobId);
-        if (!exists) merged.unshift(job);
-      }
-
-      setItems(merged);
-      setLoading(false);
-
-      /* ❸ 未完了ジョブのポーリングを再開 */
-      merged
-        .filter((it) => it.phase !== "ready" && it.phase !== "error")
-        .forEach((it) =>
-          startPolling(it.sttJobId!, it.file_id, it.phase === "draft")
-        );
-    })();
+    refreshFromServer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ---------- ジョブポーリング ---------- */
-  const startPolling = (jobId: string, fileId: string, draftAlready = false) => {
-    /* Whisper or Draft どちらのジョブかは draftAlready で分岐 */
+  /* --------- サーバから一覧を取得 --------- */
+  const refreshFromServer = async () => {
+    /* 1. transcripts */
+    const { items: trs } = await json<{ items: Transcript[] }>(
+      "/minutes/api/transcripts?limit=100&order=desc"
+    );
+
+    /* 2. jobs */
+    const jobs = await json<
+      {
+        task_id: string;
+        status: "PENDING" | "PROCESSING" | "DRAFT_READY" | "FAILED";
+      }[]
+    >("/minutes/api/jobs");
+    const phaseByJob = new Map<string, Phase>();
+    jobs.forEach((j) =>
+      phaseByJob.set(
+        j.task_id,
+        j.status === "DRAFT_READY"
+          ? "ready"
+          : j.status === "FAILED"
+          ? "error"
+          : j.status === "PROCESSING"
+          ? "draft"
+          : "stt"
+      )
+    );
+
+    /* 3. transcripts をベースに items を構築 */
+    const list: ItemEx[] = trs.map((t) => ({
+      ...t,
+      phase: "ready",
+    }));
+
+    /* 4. state に既にある “処理中プレースホルダー” を維持しつつ phase 更新 */
+    items
+      .filter((it) => it.phase !== "ready" && it.phase !== "error")
+      .forEach((ph) => {
+        const p = phaseByJob.get(ph.sttJobId!);
+        list.unshift({
+          ...ph,
+          phase: p ?? ph.phase,
+        });
+      });
+
+    /* 5. ソート */
+    list.sort(
+      (a, b) => +new Date(b.created_at) - +new Date(a.created_at)
+    );
+
+    setItems(list);
+    setLoad(false);
+
+    /* 6. ポーリング再開 */
+    list
+      .filter((it) => it.phase !== "ready" && it.phase !== "error")
+      .forEach((it) =>
+        startPolling(it.sttJobId!, it.file_id, it.phase === "draft")
+      );
+  };
+
+  /* --------- ポーリング --------- */
+  const startPolling = (
+    jobId: string,
+    fileId: string,
+    draftAlready = false
+  ) => {
     const poll = window.setInterval(async () => {
-      const res = await fetch(`/minutes/api/jobs/${jobId}`);
-      if (!res.ok) return; // まだ
+      const r = await fetch(`/minutes/api/jobs/${jobId}`);
+      if (!r.ok) return;
       clearInterval(poll);
 
       if (!draftAlready) {
-        /* Whisper 完了 → transcript 再取得してプレースホルダ置換 */
+        /* Whisper 完了 → transcript 取得 */
         const { items: list } = await json<{ items: Transcript[] }>(
           "/minutes/api/transcripts?limit=100&order=desc"
         );
-        const tr = list.find((row) => row.file_id === fileId);
+        const tr = list.find((t) => t.file_id === fileId);
         if (!tr) {
-          setItems((prev) =>
-            prev.map((it) =>
-              it.file_id === fileId ? { ...it, phase: "error" } : it
+          setItems((p) =>
+            p.map((it) =>
+              it.sttJobId === jobId ? { ...it, phase: "error" } : it
             )
           );
           return;
         }
-        /* phase = draft */
-        setItems((prev) =>
-          prev.map((it) =>
-            it.file_id === fileId
+        /* draft フェーズへ */
+        setItems((p) =>
+          p.map((it) =>
+            it.sttJobId === jobId
               ? { ...tr, phase: "draft", sttJobId: jobId }
               : it
           )
         );
-
-        /* Draft 生成開始 */
+        /* Draft 生成要求 */
         const resp = await fetch(`/minutes/api/${tr.id}/draft`, {
           method: "POST",
         });
-        if (!resp.ok) {
-          setItems((prev) =>
-            prev.map((it) =>
-              it.file_id === fileId ? { ...it, phase: "error" } : it
-            )
-          );
-          return;
-        }
-        const { task_id: draftId } = await resp.json();
-        startPolling(draftId, fileId, true);
+        if (!resp.ok) return;
+        const { task_id } = await resp.json();
+        startPolling(task_id, fileId, true);
       } else {
         /* Draft 完了 */
-        setItems((prev) =>
-          prev.map((it) =>
-            it.file_id === fileId ? { ...it, phase: "ready" } : it
+        setItems((p) =>
+          p.map((it) =>
+            it.sttJobId === jobId ? { ...it, phase: "ready" } : it
           )
         );
       }
@@ -166,23 +150,7 @@ export default function MinutesList() {
     timers.current.push(poll);
   };
 
-  /* ---------- 削除 ---------- */
-  const deleteTranscript = async (id: number, fileId: string) => {
-    if (!confirm("選択したトランスクリプトを完全に削除します。よろしいですか？"))
-      return;
-    try {
-      const rsp = await fetch(`/minutes/api/transcripts/${id}`, {
-        method: "DELETE",
-      });
-      if (!rsp.ok) throw new Error(await rsp.text());
-
-      setItems((prev) => prev.filter((it) => it.file_id !== fileId));
-    } catch (e: any) {
-      alert(e.message || e);
-    }
-  };
-
-  /* ---------- アップロード成功時 ---------- */
+  /* --------- アップロード成功 --------- */
   const handleUploadSuccess = ({
     fileId,
     taskId,
@@ -192,7 +160,7 @@ export default function MinutesList() {
     taskId: string;
     filename: string;
   }) => {
-    setItems((prev) => [
+    setItems((p) => [
       {
         id: -1,
         file_id: fileId,
@@ -201,15 +169,20 @@ export default function MinutesList() {
         phase: "stt",
         sttJobId: taskId,
       },
-      ...prev,
+      ...p,
     ]);
     startPolling(taskId, fileId);
   };
 
-  /* -------------------- レンダリング -------------------- */
-  if (loading) {
-    return <Loader2 className="m-auto animate-spin" size={32} />;
-  }
+  /* --------- 削除 --------- */
+  const deleteTranscript = async (id: number, sttJobId: string) => {
+    if (!confirm("Delete this transcript?")) return;
+    await fetch(`/minutes/api/transcripts/${id}`, { method: "DELETE" });
+    setItems((p) => p.filter((it) => it.sttJobId !== sttJobId));
+  };
+
+  /* --------- UI --------- */
+  if (loading) return <Loader2 className="m-auto animate-spin" size={32} />;
 
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-6">
@@ -220,34 +193,11 @@ export default function MinutesList() {
 
       <ul className="space-y-2">
         {items.map((t) => (
-          <li
-            key={`${t.file_id}-${t.phase}`}
-            className="border rounded p-3 hover:bg-gray-50"
-          >
+          <li key={t.sttJobId + t.phase} className="border rounded p-3">
             {t.phase === "ready" ? (
-              <div className="flex items-center gap-2">
-                <Link
-                  to={`/workspace/${t.id}`}
-                  className="flex-1 truncate hover:underline"
-                >
-                  {t.filename}
-                </Link>
-                <StatusLamp state="ready" />
-                <button
-                  onClick={() => deleteTranscript(t.id, t.file_id)}
-                  title="Delete"
-                  className="text-gray-400 hover:text-red-600"
-                >
-                  <Trash2 size={18} />
-                </button>
-              </div>
+              <ReadyRow item={t} onDelete={deleteTranscript} />
             ) : (
-              <div className="flex items-center gap-2">
-                <span className="flex-1 truncate text-gray-500">
-                  {t.filename}
-                </span>
-                <StatusLamp state={t.phase} />
-              </div>
+              <ProcessingRow item={t} />
             )}
           </li>
         ))}
@@ -256,15 +206,45 @@ export default function MinutesList() {
   );
 }
 
-/* -------------------- UploadDialog (既存) -------------------- */
+/* ---------- サブコンポーネント ---------- */
+const ReadyRow = ({
+  item,
+  onDelete,
+}: {
+  item: ItemEx;
+  onDelete: (id: number, sttJobId: string) => void;
+}) => (
+  <div className="flex items-center gap-2">
+    <Link
+      to={`/workspace/${item.id}`}
+      className="flex-1 truncate hover:underline"
+    >
+      {item.filename}
+    </Link>
+    <StatusLamp state="ready" />
+    <button
+      onClick={() => onDelete(item.id, item.sttJobId)}
+      className="text-gray-400 hover:text-red-600"
+      title="Delete"
+    >
+      <Trash2 size={18} />
+    </button>
+  </div>
+);
+
+const ProcessingRow = ({ item }: { item: ItemEx }) => (
+  <div className="flex items-center gap-2">
+    {item.filename}
+    <span className="text-gray-500 ml-1">(Processing)</span>
+    <StatusLamp state={item.phase} />
+  </div>
+);
+
+/* ---------- UploadDialog (既存) ---------- */
 function UploadDialog({
   onDone,
 }: {
-  onDone: (info: {
-    fileId: string;
-    taskId: string;
-    filename: string;
-  }) => void;
+  onDone: (info: { fileId: string; taskId: string; filename: string }) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -273,7 +253,6 @@ function UploadDialog({
     if (!e.target.files?.length) return;
     const file = e.target.files[0];
     setUploading(true);
-
     try {
       const fd = new FormData();
       fd.append("file", file);
@@ -281,13 +260,9 @@ function UploadDialog({
         method: "POST",
         body: fd,
       });
-      if (!rsp.ok) throw new Error(await rsp.text());
       const { file_id, task_id } = await rsp.json();
-
       onDone({ fileId: file_id, taskId: task_id, filename: file.name });
       setOpen(false);
-    } catch (err) {
-      alert("Upload failed: " + err);
     } finally {
       setUploading(false);
     }
@@ -297,7 +272,7 @@ function UploadDialog({
     <>
       <button
         onClick={() => setOpen(true)}
-        className="ml-auto flex items-center gap-1 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded px-3 py-1"
+        className="ml-auto flex items-center gap-1 text-sm bg-indigo-600 text-white rounded px-3 py-1"
       >
         <UploadCloud size={16} /> Upload
       </button>
@@ -307,23 +282,15 @@ function UploadDialog({
           <div className="bg-white rounded shadow-lg p-6 w-80 space-y-4">
             <h2 className="text-lg font-semibold">Upload Audio</h2>
             <input type="file" accept="audio/*" onChange={handleFile} />
-
             <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setOpen(false)}
-                className="px-3 py-1 rounded border"
-              >
+              <button onClick={() => setOpen(false)} className="px-3 py-1 rounded border">
                 Cancel
               </button>
               <button
                 disabled={uploading}
                 className="px-3 py-1 rounded bg-indigo-600 text-white disabled:opacity-60"
               >
-                {uploading ? (
-                  <Loader2 className="animate-spin" size={16} />
-                ) : (
-                  "Upload"
-                )}
+                {uploading ? <Loader2 className="animate-spin" size={16} /> : "Upload"}
               </button>
             </div>
           </div>
