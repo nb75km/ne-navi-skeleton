@@ -14,3 +14,6 @@ diff-match-patch>=20230430
 fastapi-users[sqlalchemy]==13.*
 python-jose==3.*
 pwdlib==0.2.*
+fastapi-users-db-sqlalchemy>=7
+asyncpg>=0.29
+

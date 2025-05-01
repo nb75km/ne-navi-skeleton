@@ -16,7 +16,7 @@ from fastapi_users.authentication import (
 )
 from fastapi_users.db import SQLAlchemyUserDatabase
 
-from .deps import db_session  # :contentReference[oaicite:4]{index=4}
+from .deps import async_db_session  # :contentReference[oaicite:4]{index=4}
 from .models.user import User  # :contentReference[oaicite:5]{index=5}
 
 # ------------------------------------------------------------------ #
@@ -43,7 +43,7 @@ auth_backend = AuthenticationBackend(
 # ------------------------------------------------------------------ #
 
 async def get_user_db(
-    session=Depends(db_session),
+    session=Depends(async_db_session),
 ) -> AsyncGenerator[SQLAlchemyUserDatabase, None]:
     """FastAPI-Users が要求する DB アダプタを返す。"""
     yield SQLAlchemyUserDatabase(session, User)
