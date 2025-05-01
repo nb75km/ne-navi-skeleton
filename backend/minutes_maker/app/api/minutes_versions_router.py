@@ -23,6 +23,8 @@ from fastapi import APIRouter, HTTPException, Depends, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
+from common.security import current_active_user
+from common.models.user import User
 
 from openai import OpenAI
 
@@ -84,11 +86,12 @@ class AIEditIn(BaseModel):
 def list_versions(
     transcript_id: int = Query(..., description="Filter by transcript"),
     db: Session = Depends(get_db),
+    user: User = Depends(current_active_user),
 ):
     """Return *all* versions of the given transcript, latest first."""
     stmt = (
         select(M.MinutesVersion)
-        .where(M.MinutesVersion.transcript_id == transcript_id)
+        .where(M.MinutesVersion.transcript_id == transcript_id, M.MinutesVersion.user_id == user.id,)
         .order_by(M.MinutesVersion.version_no.desc())
     )
     return db.scalars(stmt).all()
@@ -103,6 +106,7 @@ def create_version(
     body: MinutesVersionIn,
     transcript_id: int = Query(..., description="Parent transcript id"),
     db: Session = Depends(get_db),
+    user: User = Depends(current_active_user),
 ):
     """Manually create a new minutes version (e.g. from the editor *Save* button)."""
     next_no: int = (
@@ -119,6 +123,7 @@ def create_version(
         markdown=body.markdown,
         created_by=body.created_by,
         created_at=datetime.utcnow(),
+        user_id=user.id,
     )
     db.add(mv)
     db.commit()

@@ -1,5 +1,6 @@
 FROM ne-navi-base:latest
 WORKDIR /app
+ENV PYTHONPATH="/app/backend:${PYTHONPATH}"
 
 # WeasyPrint 周りのライブラリに加え、日本語フォントをインストール
 RUN apt-get update && apt-get install -y \

@@ -3,6 +3,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from openai import OpenAI
 import json as _json
+from common.security import current_active_user
+from common.models.user import User
 
 from ..db import SessionLocal, models as M
 
@@ -27,7 +29,10 @@ class EditResponse(BaseModel):
     versionNo: int
 
 @router.post("/agent", response_model=EditResponse)
-def call_agent(q: Ask, db: Session = Depends(get_db)):
+def call_agent(q: Ask, db: Session = Depends(get_db), user: User = Depends(current_active_user),):
+    tr = db.get(M.Transcript, q.transcript_id)
+    if tr is None or tr.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Transcript not found")
     # 1) ユーザー発話を保存
     db.add(M.Message(transcript_id=q.transcript_id, role="user", body=q.body))
     db.commit()

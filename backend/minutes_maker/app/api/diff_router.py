@@ -5,6 +5,8 @@ from diff_match_patch import diff_match_patch
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from common.security import current_active_user
+from common.models.user import User
 
 from ..db import SessionLocal, models as M # 既存の DB セッション取得関数
 
@@ -39,6 +41,7 @@ def diff_versions(
     cleanup_semantic: bool = Query(
         True, description="diff_cleanupSemantic を適用するか"),
     db: Session = Depends(get_db),
+    user: User = Depends(current_active_user),
 ):
     """
     2 つの MinutesVersion (Markdown) を比較し、
@@ -46,7 +49,12 @@ def diff_versions(
     """
     v1 = db.get(M.MinutesVersion, from_id)
     v2 = db.get(M.MinutesVersion, to_id)
-    if v1 is None or v2 is None:
+    if (
+        v1 is None
+        or v2 is None
+        or v1.user_id != user.id
+        or v2.user_id != user.id
+    ):
         raise HTTPException(404, "Version not found")
 
     diffs = dmp.diff_main(v1.markdown, v2.markdown)

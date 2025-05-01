@@ -12,8 +12,10 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, UploadFile, Depends
 from sqlalchemy.orm import Session
+from common.security import current_active_user
+from common.models.user import User
 
 from minutes_maker.app import SessionLocal
 from minutes_maker.app.db import models as M
@@ -38,7 +40,10 @@ def _save_file_to_disk(f: UploadFile, dst: Path):
 #  endpoint
 # --------------------------------------------------------------------------- #
 @router.post("/files")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(
+    file: UploadFile = File(...),
+    user: User = Depends(current_active_user),
+):
     # ---------- 1. ファイル保存 ------------------------------------------------
     file_id = str(uuid4())
     dst = UPLOAD_DIR / f"{file_id}_{file.filename}"
@@ -55,7 +60,8 @@ async def upload_file(file: UploadFile = File(...)):
                 file_id=file_id,
                 filename=file.filename,
                 mime_type=file.content_type,
-                uploaded_by="ui_user",
+                uploaded_by=user.id,
+                user_id=user.id,
             )
         )
         sess.commit()
@@ -66,7 +72,7 @@ async def upload_file(file: UploadFile = File(...)):
     job_id = str(uuid4())
 
     task = transcribe_and_generate_minutes.apply_async(
-        args = (file_id, job_id),
+        args = (file_id, job_id, str(user.id)),
         task_id = job_id,  # ← task.id == job_id になる
     )
 
@@ -77,6 +83,7 @@ async def upload_file(file: UploadFile = File(...)):
                 id=job_id,          # ← primary key を task.id に固定
                 task_id=task.id,
                 status=M.JobStatus.PENDING,
+                user_id=user.id,
             )
         )
         sess.commit()

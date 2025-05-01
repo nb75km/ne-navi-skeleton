@@ -1,51 +1,76 @@
+"""
+認証・ユーザー依存性をまとめた共通モジュール。
+FastAPI インスタンスを **生成しない** ので、
+各サービス(app/main.py) で自由にルータをマウント出来る。
+"""
+
+import os, uuid
+from typing import AsyncGenerator
+
+from fastapi import Depends
 from fastapi_users import FastAPIUsers, UUIDIDMixin, BaseUserManager
-from fastapi_users.authentication import CookieTransport, JWTStrategy, AuthenticationBackend
-from fastapi import FastAPI
-import uuid, os
+from fastapi_users.authentication import (
+    CookieTransport,
+    JWTStrategy,
+    AuthenticationBackend,
+)
+from fastapi_users.db import SQLAlchemyUserDatabase
+
+from .deps import db_session  # :contentReference[oaicite:4]{index=4}
+from .models.user import User  # :contentReference[oaicite:5]{index=5}
+
+# ------------------------------------------------------------------ #
+# JWT / Cookie backend
+# ------------------------------------------------------------------ #
 
 SECRET = os.getenv("SECRET_KEY")
+if not SECRET:
+    raise RuntimeError("SECRET_KEY env var is required for JWT auth")
 
-cookie_transport = CookieTransport(cookie_name="access", cookie_max_age=3600)
+cookie_transport = CookieTransport(cookie_name="access", cookie_max_age=60 * 60)
+
 def get_jwt_strategy() -> JWTStrategy:
-    return JWTStrategy(secret=SECRET, lifetime_seconds=3600)
+    return JWTStrategy(secret=SECRET, lifetime_seconds=60 * 60)
 
 auth_backend = AuthenticationBackend(
-    name="cookie",
+    name="jwt",
     transport=cookie_transport,
     get_strategy=get_jwt_strategy,
 )
 
+# ------------------------------------------------------------------ #
+# DB bridge
+# ------------------------------------------------------------------ #
+
+async def get_user_db(
+    session=Depends(db_session),
+) -> AsyncGenerator[SQLAlchemyUserDatabase, None]:
+    """FastAPI-Users が要求する DB アダプタを返す。"""
+    yield SQLAlchemyUserDatabase(session, User)
+
+# ------------------------------------------------------------------ #
+# User manager & public dependencies
+# ------------------------------------------------------------------ #
+
 class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     reset_password_token_secret = SECRET
-    verification_token_secret   = SECRET
-    # on_after_register などをオーバーライドしてログ取りも可
+    verification_token_secret = SECRET
 
 async def get_user_manager(user_db=Depends(get_user_db)):
     yield UserManager(user_db)
 
-fastapi_users = FastAPIUsers[User, uuid.UUID](
-    get_user_manager,                  # 既に実装済みの UserManager
+fastapi_users: FastAPIUsers[User, uuid.UUID] = FastAPIUsers(
+    get_user_manager,
     [auth_backend],
 )
 
-app = FastAPI()
+# ★ 他モジュールが import しやすい依存性
+current_user = fastapi_users.current_user()
+current_active_user = fastapi_users.current_user(active=True)
 
-# ★ サインアップルータを追加
-from common.schemas import UserRead, UserCreate
-app.include_router(
-    fastapi_users.get_register_router(UserRead, UserCreate),  # POST /auth/register
-    prefix="/auth",
-    tags=["auth"],
-)
-# ★ ログイン／ログアウトも標準ルータを付ける
-app.include_router(
-    fastapi_users.get_auth_router(auth_backend),              # /auth/login, /auth/logout
-    prefix="/auth",
-    tags=["auth"],
-)
-# 認証必須で現在のユーザーを返す
-app.include_router(
-    fastapi_users.get_users_router(UserRead, UserCreate),
-    prefix="/users",
-    tags=["users"],
+__all__ = (
+    "auth_backend",
+    "fastapi_users",
+    "current_user",
+    "current_active_user",
 )

@@ -9,9 +9,29 @@ from .api.jobs_router import router as jobs_router
 from .api.agent_router import router as agent_router
 from .api.minutes_chat_router import router as mc_router   # ★ 追加
 from .api.diff_router import router as diff_router   # ★ 追加
+from common.security import fastapi_users, auth_backend  # :contentReference[oaicite:6]{index=6}
+from common.schemas import UserRead, UserCreate  # :contentReference[oaicite:7]{index=7}
+        #
 
 app = FastAPI(title="NE Navi – Minutes Maker")
 
+
+# ---- Auth routers ---------------------------------------------------
+app.include_router(
+    fastapi_users.get_auth_router(auth_backend),
+    prefix="/auth/jwt",
+    tags=["auth"],
+)
+app.include_router(
+    fastapi_users.get_register_router(UserRead, UserCreate),
+    prefix="/auth",
+    tags=["auth"],
+)
+app.include_router(
+    fastapi_users.get_users_router(UserRead, UserCreate),
+    prefix="/users",
+    tags=["auth"],
+)
 
 @app.get("/health")
 def health():

@@ -7,6 +7,8 @@ from docx import Document
 from io import BytesIO
 import markdown as md
 import json
+from common.security import current_active_user
+from common.models.user import User
 
 from ..db import SessionLocal, models as M
 from ..service import export_file
@@ -26,6 +28,7 @@ def list_transcripts(
     limit: int = Query(50, le=200),
     offset: int = 0,
     db: Session = Depends(get_db),
+    user: User = Depends(current_active_user),
 ):
     q = (
         db.query(
@@ -36,6 +39,7 @@ def list_transcripts(
             M.Transcript.created_at,
         )
         .join(M.File, M.File.file_id == M.Transcript.file_id)
+        .filter(M.Transcript.user_id == user.id)
         .order_by(M.Transcript.created_at.desc())
         .limit(limit)
         .offset(offset)
@@ -44,11 +48,15 @@ def list_transcripts(
 
 # --- 既存: DETAIL ---
 @router.get("/transcripts/{tid}", status_code=status.HTTP_200_OK)
-def get_transcript(tid: int, db: Session = Depends(get_db)):
+def get_transcript(
+    tid: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_user),
+):
     t = (
         db.query(M.Transcript, M.File.filename)
         .join(M.File, M.File.file_id == M.Transcript.file_id)
-        .filter(M.Transcript.id == tid)
+        .filter(M.Transcript.id == tid, M.Transcript.user_id == user.id)
         .first()
     )
     if not t:
