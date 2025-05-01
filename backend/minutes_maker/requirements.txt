@@ -11,3 +11,6 @@ python-docx>=0.8.11
 markdown>=3.4.1
 weasyprint>=57.0
 diff-match-patch>=20230430
+fastapi-users[sqlalchemy]==13.*
+python-jose==3.*
+pwdlib==0.2.*

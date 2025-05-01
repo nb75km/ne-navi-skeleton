@@ -8,7 +8,9 @@ from alembic import context
 import os
 from chat_explorer.app.db.models import Base as ChatBase
 from minutes_maker.app.db.models import Base as MinutesBase
-target_metadata = [ChatBase.metadata, MinutesBase.metadata]
+from common.models.user import Base as UserBase
+
+target_metadata = [ChatBase.metadata, MinutesBase.metadata, UserBase.metadata]
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

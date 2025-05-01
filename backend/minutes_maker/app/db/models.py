@@ -1,10 +1,10 @@
 """SQLAlchemy ORM models for the *Minutes Maker* (schema = "minutes")."""
 from __future__ import annotations
 
+import enum
+import uuid                               # ←★追加：型ヒント用
 from datetime import datetime
 from typing import List, Optional
-
-import enum
 from uuid import uuid4
 
 from pgvector.sqlalchemy import Vector
@@ -19,20 +19,21 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    Computed,
 )
-from sqlalchemy.dialects.postgresql import TSVECTOR
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy import Computed
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects.postgresql import TSVECTOR, UUID as PG_UUID  # ←★UUID 別名
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from common.models.user import User
 
+# --------------------------------------------------------------------------- #
+#  Base & 共通設定
+# --------------------------------------------------------------------------- #
 class Base(DeclarativeBase):
     """Declarative base class bound to the *minutes* schema."""
 
 
-# --------------------------------------------------------------------------- #
-#  共通
-# --------------------------------------------------------------------------- #
 Base.metadata.schema = "minutes"  # type: ignore[attr-defined]
 
 
@@ -59,6 +60,15 @@ class File(Base):
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow
     )
+
+    # ★ユーザー関連
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("public.users.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    user: Mapped[User] = relationship("User", lazy="joined")  # optional
 
     transcripts: Mapped[List["Transcript"]] = relationship(
         back_populates="file", cascade="all, delete-orphan"
@@ -89,6 +99,15 @@ class Transcript(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow
     )
+
+    # ★ユーザー関連
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("public.users.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    user: Mapped[User] = relationship("User", lazy="joined")
 
     file: Mapped["File"] = relationship(back_populates="transcripts")
     chunks: Mapped[List["TranscriptChunk"]] = relationship(
@@ -152,6 +171,15 @@ class MinutesVersion(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow
     )
+
+    # ★ユーザー関連
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("public.users.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    user: Mapped[User] = relationship("User", lazy="joined")
 
     transcript: Mapped["Transcript"] = relationship(back_populates="versions")
 
